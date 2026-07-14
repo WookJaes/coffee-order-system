@@ -357,7 +357,7 @@ GET /api/menus
 ```json
 {
   "status": 200,
-  "message": "커피 메뉴 목록 조회 성공",
+  "message": "요청이 성공했습니다.",
   "data": [
     {
       "menuId": 1,
