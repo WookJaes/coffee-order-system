@@ -85,7 +85,33 @@ class PointControllerTest {
 				.content("{\"userId\":1,\"amount\":\"invalid\"}"))
 			.andExpect(status().isBadRequest())
 			.andExpect(jsonPath("$.status").value(400))
-			.andExpect(jsonPath("$.message").value("충전 금액은 1 이상 100,000 이하여야 합니다."))
+			.andExpect(jsonPath("$.message").value("요청 본문 형식이 올바르지 않습니다."))
+			.andExpect(jsonPath("$.data").doesNotExist());
+		verifyNoInteractions(pointService);
+	}
+
+	@Test
+	void 숫자가_아닌_사용자_ID는_400_실패_공통_응답을_반환한다() throws Exception {
+		// when & then
+		mockMvc.perform(post("/api/points/charge")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"userId\":\"invalid\",\"amount\":10000}"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.status").value(400))
+			.andExpect(jsonPath("$.message").value("요청 본문 형식이 올바르지 않습니다."))
+			.andExpect(jsonPath("$.data").doesNotExist());
+		verifyNoInteractions(pointService);
+	}
+
+	@Test
+	void 문법이_잘못된_JSON은_400_실패_공통_응답을_반환한다() throws Exception {
+		// when & then
+		mockMvc.perform(post("/api/points/charge")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.status").value(400))
+			.andExpect(jsonPath("$.message").value("요청 본문 형식이 올바르지 않습니다."))
 			.andExpect(jsonPath("$.data").doesNotExist());
 		verifyNoInteractions(pointService);
 	}
