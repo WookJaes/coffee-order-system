@@ -1,6 +1,8 @@
 package com.example.coffeeordersystem.point.entity;
 
 import com.example.coffeeordersystem.global.entity.BaseEntity;
+import com.example.coffeeordersystem.global.exception.BusinessException;
+import com.example.coffeeordersystem.global.exception.ErrorCode;
 import com.example.coffeeordersystem.user.entity.User;
 
 import jakarta.persistence.Column;
@@ -40,5 +42,12 @@ public class Point extends BaseEntity {
 
 	public void charge(Integer amount) {
 		balance += amount;
+	}
+
+	public void use(Integer amount) {
+		if (balance < amount) {
+			throw new BusinessException(ErrorCode.INSUFFICIENT_POINT);
+		}
+		balance -= amount;
 	}
 }

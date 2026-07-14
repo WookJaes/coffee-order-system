@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -41,7 +42,7 @@ class MenuControllerTest {
 		// then
 		result
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.status").value(200))
+			.andExpect(jsonPath("$.status").value(HttpStatus.OK.value()))
 			.andExpect(jsonPath("$.message").value("요청이 성공했습니다."))
 			.andExpect(jsonPath("$.data[0].menuId").value(1))
 			.andExpect(jsonPath("$.data[0].name").value("아메리카노"))

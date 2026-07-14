@@ -2,7 +2,7 @@
 
 ## 1. 설계 의도
 
-다수 서버 환경에서도 안정적으로 동작하는 커피숍 주문 시스템을 설계하고 구현하는 것을 목표로 한다.
+초기 구현은 단일 애플리케이션 인스턴스로 운영하되, 다수 서버 환경으로 확장해도 정합성을 유지할 수 있는 커피숍 주문 시스템을 설계하고 구현하는 것을 목표로 한다.
 
 사용자는 커피 메뉴를 조회하고, 포인트를 충전한 뒤 포인트로 커피를 주문 및 결제할 수 있다.
 
@@ -93,8 +93,8 @@ Optional<Point> findByUserIdForUpdate(Long userId);
 
 ```text
 주문/결제 성공
--> order_events에 PENDING 이벤트 저장
--> Kafka topic(order-paid)에 주문 완료 이벤트 발행
+-> order_events에 PENDING 이벤트 저장 (현재 구현)
+-> Kafka topic(order-paid)에 주문 완료 이벤트 발행 (후속 구현)
 -> product-ranking-group: Redis ZSET에 메뉴별 주문 수 누적
 -> payment-history-group: 결제/주문 히스토리 저장 또는 검증
 ```
@@ -146,18 +146,18 @@ order by order_count desc
 limit 3;
 ```
 
-### 2.7 다중 서버 및 고가용성 전략
+### 2.7 다중 서버 및 고가용성 확장 전략
 
-애플리케이션 서버를 여러 대로 늘리더라도 모든 서버가 같은 MySQL과 Redis를 바라보도록 구성한다. 서버별로 데이터 저장소가 분리되면 주문, 포인트, 인기 메뉴 집계 결과가 달라질 수 있기 때문이다.
+현재 구현은 애플리케이션 서버 1대와 단일 MySQL·Redis·Kafka Broker를 사용한다. 이후 애플리케이션 서버를 여러 대로 늘릴 때도 모든 인스턴스가 같은 MySQL과 Redis를 바라보도록 구성한다. 서버별로 데이터 저장소가 분리되면 주문, 포인트, 인기 메뉴 집계 결과가 달라질 수 있기 때문이다.
 
 다만 단일 MySQL 또는 단일 Redis 인스턴스만 사용하면 해당 인스턴스 장애가 전체 서비스 장애로 이어질 수 있다. 운영 환경에서는 다음 구성을 고려한다.
 
 | 구성 요소 | 초기 구현 | 운영 환경 고려 |
 | --- | --- | --- |
-| Application Server | 여러 인스턴스 실행 가능 | 로드밸런서를 통한 트래픽 분산 |
+| Application Server | 1 인스턴스 | 로드밸런서를 통한 다중 인스턴스 트래픽 분산 |
 | MySQL | 단일 인스턴스 | Primary-Replica 구조, 장애 시 Failover |
 | Redis | 단일 인스턴스 | Redis Sentinel 또는 Redis Cluster |
-| Kafka | 주문 완료 이벤트 발행 | Broker 3대 이상 구성 |
+| Kafka | 단일 Broker에서 주문 완료 이벤트 발행 | Broker 3대 이상 구성 |
 
 MySQL은 쓰기 작업이 필요한 주문, 포인트 충전, 포인트 차감은 Primary에서 처리하고, 메뉴 조회나 인기 메뉴 조회 같은 읽기 요청은 Replica로 분산할 수 있다. 다만 주문 직후 즉시 반영되어야 하는 데이터는 복제 지연을 고려해 Primary를 조회하거나 정합성 요구 수준에 따라 조회 전략을 분리한다.
 
@@ -229,6 +229,7 @@ erDiagram
         bigint id PK
         bigint user_id FK
         bigint menu_id FK
+        int quantity
         varchar idempotency_key
         int order_price
         varchar status
@@ -319,9 +320,10 @@ erDiagram
 | id | BIGINT | Long | 주문 ID |
 | user_id | BIGINT | Long | 사용자 ID |
 | menu_id | BIGINT | Long | 메뉴 ID |
+| quantity | INT | Integer | 주문 수량, 1 이상 |
 | idempotency_key | VARCHAR | String | 주문/결제 중복 요청 방지 키 |
-| order_price | INT | Integer | 주문 금액 |
-| status | VARCHAR | OrderStatus | PAID, FAILED, CANCELED |
+| order_price | INT | Integer | 주문 시점 메뉴 가격과 수량을 곱한 총 결제금액 |
+| status | VARCHAR | OrderStatus | PAID |
 | ordered_at | DATETIME | LocalDateTime | 주문 시각 |
 | created_at | DATETIME | LocalDateTime | 생성 시각 |
 | updated_at | DATETIME | LocalDateTime | 수정 시각 |
@@ -330,7 +332,7 @@ erDiagram
 
 #### order_events
 
-데이터 수집 플랫폼으로 전송할 주문 이벤트를 저장한다.
+데이터 수집 플랫폼으로 전송할 주문 이벤트를 저장한다. `order_id` 유니크 제약으로 주문 1건과 Outbox 이벤트 1건을 일대일로 연결한다.
 
 | 컬럼 | DB 타입 | Java 타입 | 설명 |
 | --- | --- | --- | --- |
@@ -339,7 +341,7 @@ erDiagram
 | user_id | BIGINT | Long | 사용자 ID |
 | menu_id | BIGINT | Long | 메뉴 ID |
 | payment_amount | INT | Integer | 결제 금액 |
-| status | VARCHAR | OrderEventStatus | PENDING, SENT, FAILED |
+| status | VARCHAR | OrderEventStatus | PENDING |
 | retry_count | INT | Integer | 재시도 횟수 |
 | created_at | DATETIME | LocalDateTime | 생성 시각 |
 | updated_at | DATETIME | LocalDateTime | 수정 시각 |
@@ -400,12 +402,21 @@ POST /api/points/charge
 }
 ```
 
-실패 응답 예시:
+실패 응답 예시(0 이하):
 
 ```json
 {
   "status": 400,
-  "message": "충전 금액은 0보다 커야 합니다."
+  "message": "충전 금액은 1 이상이어야 합니다."
+}
+```
+
+실패 응답 예시(100,000 초과):
+
+```json
+{
+  "status": 400,
+  "message": "충전 금액은 100,000 이하여야 합니다."
 }
 ```
 <br/>
@@ -422,7 +433,8 @@ Idempotency-Key: 7f4f0c2e-2d3e-4b1f-9e45-aaaa1111bbbb
 ```json
 {
   "userId": 1,
-  "menuId": 1
+  "menuId": 1,
+  "quantity": 2
 }
 ```
 
@@ -431,13 +443,14 @@ Idempotency-Key: 7f4f0c2e-2d3e-4b1f-9e45-aaaa1111bbbb
 ```json
 {
   "status": 201,
-  "message": "커피 주문 및 결제 성공",
+  "message": "주문 및 결제가 성공적으로 완료되었습니다.",
   "data": {
     "orderId": 1,
     "userId": 1,
     "menuId": 1,
-    "paymentAmount": 4500,
-    "remainingPoint": 5500,
+    "quantity": 2,
+    "paymentAmount": 9000,
+    "remainingPoint": 1000,
     "status": "PAID"
   }
 }
@@ -451,6 +464,8 @@ Idempotency-Key: 7f4f0c2e-2d3e-4b1f-9e45-aaaa1111bbbb
   "message": "포인트가 부족합니다."
 }
 ```
+
+`quantity`는 1 이상의 정수다. 결제 금액은 주문 시점 메뉴 가격과 수량의 곱이며 `orders.order_price`, 포인트 사용 이력, Outbox의 결제금액에 같은 총액으로 저장된다. 동일 사용자·동일 `Idempotency-Key`로 같은 메뉴와 수량을 재요청하면 기존 주문 결과를 반환하며 포인트를 중복 차감하지 않는다. 이때 `remainingPoint`는 주문의 `USE` 이력에 저장한 차감 후 잔액으로 복원한다. 같은 키에 다른 메뉴 또는 수량을 사용하면 HTTP 409으로 실패한다. 주문 성공 시 `orders`, 포인트 차감, `point_histories`의 `USE` 이력, `order_events`의 `PENDING` 이벤트가 하나의 트랜잭션으로 저장된다. Kafka 발행은 현재 API 범위에 포함하지 않는다.
 <br/>
 
 #### 인기 메뉴 목록 조회 API
@@ -661,7 +676,8 @@ curl -X POST http://localhost:8080/api/orders \
   -H "Idempotency-Key: 7f4f0c2e-2d3e-4b1f-9e45-aaaa1111bbbb" \
   -d '{
     "userId": 1,
-    "menuId": 1
+    "menuId": 1,
+    "quantity": 1
   }'
 ```
 

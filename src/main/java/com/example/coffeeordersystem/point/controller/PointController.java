@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -27,6 +28,6 @@ public class PointController {
 		@Valid @RequestBody PointChargeRequest request
 	) {
 		PointChargeResponse response = pointService.charge(request);
-		return ResponseEntity.ok(ApiResponse.ok(response));
+		return ResponseEntity.status(HttpStatus.OK).body(ApiResponse.ok(response));
 	}
 }

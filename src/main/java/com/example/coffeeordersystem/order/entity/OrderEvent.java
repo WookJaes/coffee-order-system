@@ -1,7 +1,7 @@
-package com.example.coffeeordersystem.point.entity;
+package com.example.coffeeordersystem.order.entity;
 
 import com.example.coffeeordersystem.global.entity.BaseEntity;
-import com.example.coffeeordersystem.order.entity.Order;
+import com.example.coffeeordersystem.menu.entity.Menu;
 import com.example.coffeeordersystem.user.entity.User;
 
 import jakarta.persistence.Column;
@@ -14,48 +14,51 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
+
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Getter
 @Entity
-@Table(name = "point_histories")
+@Table(name = "order_events")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class PointHistory extends BaseEntity {
+public class OrderEvent extends BaseEntity {
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
 
+	@OneToOne(fetch = FetchType.LAZY, optional = false)
+	@JoinColumn(name = "order_id", nullable = false, unique = true)
+	private Order order;
+
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)
 	@JoinColumn(name = "user_id", nullable = false)
 	private User user;
 
-	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "order_id")
-	private Order order;
+	@ManyToOne(fetch = FetchType.LAZY, optional = false)
+	@JoinColumn(name = "menu_id", nullable = false)
+	private Menu menu;
+
+	@Column(name = "payment_amount", nullable = false)
+	private Integer paymentAmount;
 
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false)
-	private PointHistoryType type;
+	private OrderEventStatus status;
 
-	@Column(nullable = false)
-	private Integer amount;
+	@Column(name = "retry_count", nullable = false)
+	private Integer retryCount;
 
-	@Column(name = "balance_after", nullable = false)
-	private Integer balanceAfter;
-
-	public PointHistory(User user, PointHistoryType type, Integer amount, Integer balanceAfter) {
-		this(user, null, type, amount, balanceAfter);
-	}
-
-	public PointHistory(User user, Order order, PointHistoryType type, Integer amount, Integer balanceAfter) {
-		this.user = user;
+	public OrderEvent(Order order) {
 		this.order = order;
-		this.type = type;
-		this.amount = amount;
-		this.balanceAfter = balanceAfter;
+		this.user = order.getUser();
+		this.menu = order.getMenu();
+		this.paymentAmount = order.getOrderPrice();
+		this.status = OrderEventStatus.PENDING;
+		this.retryCount = 0;
 	}
 }

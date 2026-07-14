@@ -55,6 +55,8 @@ Base path: `/api`
 
 ### POST /api/orders
 
+메뉴 한 건을 포인트로 결제한다. `Idempotency-Key` 헤더는 필수이며 null 또는 blank면 400으로 실패한다.
+
 Headers:
 
 ```text
@@ -62,8 +64,32 @@ Idempotency-Key: 4de91f71-4c2d-4eb9-bc8e-2b0f4603a1fb
 ```
 
 ```json
-{"userId": 1, "menuId": 1}
+{"userId": 1, "menuId": 1, "quantity": 2}
 ```
+
+성공 응답:
+
+```json
+{
+  "status": 201,
+  "message": "주문 및 결제가 성공적으로 완료되었습니다.",
+  "data": {
+    "orderId": 1,
+    "userId": 1,
+    "menuId": 1,
+    "quantity": 2,
+    "paymentAmount": 9000,
+    "remainingPoint": 1000,
+    "status": "PAID"
+  }
+}
+```
+
+- 같은 사용자·같은 멱등성 키·같은 메뉴·같은 수량 요청은 기존 주문 결과를 반환하며 포인트를 다시 차감하지 않는다. 재응답의 `remainingPoint`는 주문 당시 `USE` 이력의 차감 후 잔액이다.
+- 같은 사용자·같은 멱등성 키에 다른 `menuId` 또는 `quantity`를 사용하면 409와 `IDEMPOTENCY_KEY_CONFLICT`의 메시지로 실패한다.
+- `quantity`는 1 이상의 정수다. 결제 금액은 주문 시점 메뉴 가격과 수량의 곱이며, 응답의 `paymentAmount`와 `orders.order_price`에 저장한다.
+- 사용자·메뉴·포인트 정보 없음은 각각 404, 판매 상태가 `ACTIVE`가 아닌 메뉴와 잔액 부족은 400으로 실패한다.
+- 성공 시 주문, 포인트 차감, 사용 이력, `PENDING` Outbox 이벤트가 하나의 트랜잭션으로 저장된다. Kafka 발행은 이 API 범위에 포함하지 않는다.
 
 ### GET /api/menus/popular
 
