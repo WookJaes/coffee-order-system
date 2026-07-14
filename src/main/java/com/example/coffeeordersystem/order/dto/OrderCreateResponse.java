@@ -13,13 +13,17 @@ public record OrderCreateResponse(
 	String status
 ) {
 	public static OrderCreateResponse from(Order order, Point point) {
+		return from(order, point.getBalance());
+	}
+
+	public static OrderCreateResponse from(Order order, Integer remainingPoint) {
 		return new OrderCreateResponse(
 			order.getId(),
 			order.getUser().getId(),
 			order.getMenu().getId(),
 			order.getQuantity(),
 			order.getOrderPrice(),
-			point.getBalance(),
+			remainingPoint,
 			order.getStatus().name()
 		);
 	}

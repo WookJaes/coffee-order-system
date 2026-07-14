@@ -52,10 +52,24 @@ public class GlobalExceptionHandler {
 	}
 
 	@ExceptionHandler(DataIntegrityViolationException.class)
-	public ResponseEntity<ErrorResponse> handleDataIntegrityViolationException() {
-		ErrorCode errorCode = ErrorCode.IDEMPOTENCY_KEY_CONFLICT;
+	public ResponseEntity<ErrorResponse> handleDataIntegrityViolationException(DataIntegrityViolationException exception) {
+		ErrorCode errorCode = isIdempotencyKeyConflict(exception)
+			? ErrorCode.IDEMPOTENCY_KEY_CONFLICT
+			: ErrorCode.INTERNAL_SERVER_ERROR;
 		return ResponseEntity.status(errorCode.getStatus())
 			.body(ErrorResponse.of(errorCode.getStatus(), errorCode.getMessage()));
+	}
+
+	private boolean isIdempotencyKeyConflict(DataIntegrityViolationException exception) {
+		Throwable cause = exception;
+		while (cause != null) {
+			String message = cause.getMessage();
+			if (message != null && message.contains("uk_orders_user_id_idempotency_key")) {
+				return true;
+			}
+			cause = cause.getCause();
+		}
+		return false;
 	}
 
 	@ExceptionHandler(Exception.class)

@@ -53,7 +53,7 @@ public class OrderService {
 		int paymentAmount = calculatePaymentAmount(menu.getPrice(), request.quantity());
 		Point point = findPointForUpdate(user);
 
-		existingOrderResponse = findExistingOrderResponse(request, idempotencyKey, point);
+		existingOrderResponse = findExistingOrderResponse(request, idempotencyKey);
 		if (existingOrderResponse.isPresent()) {
 			return existingOrderResponse.get();
 		}
@@ -77,15 +77,6 @@ public class OrderService {
 			.map(order -> getExistingOrderResponse(order, request.menuId(), request.quantity()));
 	}
 
-	private Optional<OrderCreateResponse> findExistingOrderResponse(
-		OrderCreateRequest request,
-		String idempotencyKey,
-		Point point
-	) {
-		return orderRepository.findByUserIdAndIdempotencyKey(request.userId(), idempotencyKey)
-			.map(order -> getExistingOrderResponse(order, request.menuId(), request.quantity(), point));
-	}
-
 	private User findUser(Long userId) {
 		return userRepository.findById(userId)
 			.orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
@@ -105,16 +96,9 @@ public class OrderService {
 		if (!isSameOrderRequest(order, menuId, quantity)) {
 			throw new BusinessException(ErrorCode.IDEMPOTENCY_KEY_CONFLICT);
 		}
-		Point point = pointRepository.findByUserId(order.getUser().getId())
+		PointHistory pointHistory = pointHistoryRepository.findByOrderId(order.getId())
 			.orElseThrow(() -> new BusinessException(ErrorCode.POINT_NOT_FOUND));
-		return OrderCreateResponse.from(order, point);
-	}
-
-	private OrderCreateResponse getExistingOrderResponse(Order order, Long menuId, Integer quantity, Point point) {
-		if (!isSameOrderRequest(order, menuId, quantity)) {
-			throw new BusinessException(ErrorCode.IDEMPOTENCY_KEY_CONFLICT);
-		}
-		return OrderCreateResponse.from(order, point);
+		return OrderCreateResponse.from(order, pointHistory.getBalanceAfter());
 	}
 
 	private boolean isSameOrderRequest(Order order, Long menuId, Integer quantity) {

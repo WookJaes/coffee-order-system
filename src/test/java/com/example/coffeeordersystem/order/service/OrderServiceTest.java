@@ -168,6 +168,27 @@ class OrderServiceTest {
 	}
 
 	@Test
+	void 멱등_재요청은_이후_포인트_변동과_무관하게_최초_주문_결과를_반환한다() {
+		// given
+		User user = userRepository.save(new User("멱등 결과 사용자"));
+		Menu menu = menuRepository.save(new Menu("멱등 결과 커피", 4_500, MenuStatus.ACTIVE));
+		Point point = pointRepository.save(new Point(user, 10_000));
+		OrderCreateRequest request = new OrderCreateRequest(user.getId(), menu.getId(), 1);
+		var first = orderService.create(request, "same-result-key");
+		point.charge(1_000);
+
+		// when
+		var retry = orderService.create(request, "same-result-key");
+
+		// then
+		assertThat(retry).isEqualTo(first);
+		assertThat(point.getBalance()).isEqualTo(6_500);
+		assertThat(orderRepository.count()).isEqualTo(1);
+		assertThat(pointHistoryRepository.count()).isEqualTo(1);
+		assertThat(orderEventRepository.count()).isEqualTo(1);
+	}
+
+	@Test
 	void 같은_멱등성_키로_다른_메뉴를_요청하면_충돌한다() {
 		// given
 		User user = userRepository.save(new User("키 충돌 사용자"));
