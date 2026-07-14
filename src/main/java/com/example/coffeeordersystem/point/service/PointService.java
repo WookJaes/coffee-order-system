@@ -47,7 +47,7 @@ public class PointService {
 	}
 
 	private User findUserById(Long userId) {
-		return userRepository.findById(userId)
+		return userRepository.findByIdWithPessimisticLock(userId)
 			.orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 	}
 

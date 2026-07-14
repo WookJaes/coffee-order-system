@@ -15,8 +15,15 @@ import com.example.coffeeordersystem.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -119,5 +126,45 @@ class PointServiceTest {
 			.isInstanceOf(BusinessException.class)
 			.extracting(exception -> ((BusinessException)exception).getErrorCode())
 			.isEqualTo(ErrorCode.USER_NOT_FOUND);
+	}
+
+	@Test
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	@DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
+	void 같은_사용자에게_동시_충전하면_모든_충전과_이력이_반영된다() throws Exception {
+		// given
+		User user = userRepository.saveAndFlush(new User("동시 충전 사용자"));
+		int requestCount = 5;
+		ExecutorService executorService = Executors.newFixedThreadPool(requestCount);
+		CountDownLatch ready = new CountDownLatch(requestCount);
+		CountDownLatch start = new CountDownLatch(1);
+
+		try {
+			Future<?>[] futures = new Future<?>[requestCount];
+			for (int index = 0; index < requestCount; index++) {
+				futures[index] = executorService.submit(() -> {
+					ready.countDown();
+					start.await();
+					pointService.charge(new PointChargeRequest(user.getId(), 1_000));
+					return null;
+				});
+			}
+
+			ready.await();
+			start.countDown();
+			for (Future<?> future : futures) {
+				future.get();
+			}
+
+			// then
+			assertThat(pointRepository.findByUserId(user.getId())).get()
+				.extracting(point -> point.getBalance())
+				.isEqualTo(requestCount * 1_000);
+			assertThat(pointHistoryRepository.findAll())
+				.hasSize(requestCount)
+				.allSatisfy(history -> assertThat(history.getType()).isEqualTo(PointHistoryType.CHARGE));
+		} finally {
+			executorService.shutdownNow();
+		}
 	}
 }

@@ -3,6 +3,7 @@ package com.example.coffeeordersystem.global.exception;
 import com.example.coffeeordersystem.global.response.ErrorResponse;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -27,6 +28,13 @@ public class GlobalExceptionHandler {
 		String message = fieldError != null ? fieldError.getDefaultMessage() : errorCode.getMessage();
 		return ResponseEntity.status(errorCode.getStatus())
 			.body(ErrorResponse.of(errorCode.getStatus(), message));
+	}
+
+	@ExceptionHandler(HttpMessageNotReadableException.class)
+	public ResponseEntity<ErrorResponse> handleHttpMessageNotReadableException() {
+		ErrorCode errorCode = ErrorCode.INVALID_CHARGE_AMOUNT;
+		return ResponseEntity.status(errorCode.getStatus())
+			.body(ErrorResponse.of(errorCode.getStatus(), errorCode.getMessage()));
 	}
 
 	@ExceptionHandler(Exception.class)

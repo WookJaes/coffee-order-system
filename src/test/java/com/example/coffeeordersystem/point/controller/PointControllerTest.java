@@ -78,6 +78,19 @@ class PointControllerTest {
 	}
 
 	@Test
+	void 숫자가_아닌_충전_금액은_400_실패_공통_응답을_반환한다() throws Exception {
+		// when & then
+		mockMvc.perform(post("/api/points/charge")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"userId\":1,\"amount\":\"invalid\"}"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.status").value(400))
+			.andExpect(jsonPath("$.message").value("충전 금액은 1 이상 100,000 이하여야 합니다."))
+			.andExpect(jsonPath("$.data").doesNotExist());
+		verifyNoInteractions(pointService);
+	}
+
+	@Test
 	void 최대_충전_금액을_초과하면_400_실패_공통_응답을_반환한다() throws Exception {
 		// when & then
 		mockMvc.perform(post("/api/points/charge")
