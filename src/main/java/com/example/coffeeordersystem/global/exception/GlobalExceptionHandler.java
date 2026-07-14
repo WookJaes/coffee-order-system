@@ -5,6 +5,7 @@ import com.example.coffeeordersystem.global.response.ErrorResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -24,19 +25,37 @@ public class GlobalExceptionHandler {
 
 	@ExceptionHandler(MethodArgumentNotValidException.class)
 	public ResponseEntity<ErrorResponse> handleValidationException(MethodArgumentNotValidException exception) {
-		ErrorCode errorCode = exception.getFieldError("userId") != null
-			? ErrorCode.INVALID_USER_ID
-			: ErrorCode.INVALID_CHARGE_AMOUNT;
+		ErrorCode errorCode = getValidationErrorCode(exception);
 		FieldError fieldError = exception.getBindingResult().getFieldError();
 		String message = fieldError != null ? fieldError.getDefaultMessage() : errorCode.getMessage();
 		return ResponseEntity.status(errorCode.getStatus())
 			.body(ErrorResponse.of(errorCode.getStatus(), message));
 	}
 
+	private ErrorCode getValidationErrorCode(MethodArgumentNotValidException exception) {
+		if (exception.getFieldError("userId") != null) {
+			return ErrorCode.INVALID_USER_ID;
+		}
+		if (exception.getFieldError("menuId") != null) {
+			return ErrorCode.INVALID_MENU_ID;
+		}
+		if (exception.getFieldError("quantity") != null) {
+			return ErrorCode.INVALID_ORDER_QUANTITY;
+		}
+		return ErrorCode.INVALID_CHARGE_AMOUNT;
+	}
+
 	@ExceptionHandler(HttpMessageNotReadableException.class)
 	public ResponseEntity<ErrorResponse> handleHttpMessageNotReadableException() {
-		return ResponseEntity.badRequest()
+		return ResponseEntity.status(HttpStatus.BAD_REQUEST)
 			.body(ErrorResponse.of(HttpStatus.BAD_REQUEST, INVALID_REQUEST_BODY_MESSAGE));
+	}
+
+	@ExceptionHandler(DataIntegrityViolationException.class)
+	public ResponseEntity<ErrorResponse> handleDataIntegrityViolationException() {
+		ErrorCode errorCode = ErrorCode.IDEMPOTENCY_KEY_CONFLICT;
+		return ResponseEntity.status(errorCode.getStatus())
+			.body(ErrorResponse.of(errorCode.getStatus(), errorCode.getMessage()));
 	}
 
 	@ExceptionHandler(Exception.class)
