@@ -25,7 +25,29 @@ Base path: `/api`
 | POST | `/api/orders` | 메뉴 주문 및 포인트 결제 | 201 |
 | GET | `/api/menus/popular` | 최근 7일 인기 메뉴 Top 3 | 200 |
 
+### GET /api/menus
+
+판매 상태가 `ACTIVE`인 메뉴 목록을 반환한다.
+
+```json
+{
+  "status": 200,
+  "message": "요청이 성공했습니다.",
+  "data": [
+    {
+      "menuId": 1,
+      "name": "아메리카노",
+      "price": 4500
+    }
+  ]
+}
+```
+
 ### POST /api/points/charge
+
+`amount`는 1 이상 100,000 이하여야 한다.
+
+로컬 Postman 검증용으로 Flyway V3가 `userId=1`의 테스트 사용자를 사전 등록한다.
 
 ```json
 {"userId": 1, "amount": 10000}

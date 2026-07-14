@@ -375,6 +375,8 @@ GET /api/menus
 POST /api/points/charge
 ```
 
+로컬 실행 시 Flyway V3가 Postman 검증용 사용자(`userId: 1`)를 등록한다.
+
 요청:
 
 ```json
@@ -389,7 +391,7 @@ POST /api/points/charge
 ```json
 {
   "status": 200,
-  "message": "포인트 충전 성공",
+  "message": "요청이 성공했습니다.",
   "data": {
     "userId": 1,
     "chargedAmount": 10000,
@@ -514,7 +516,7 @@ GET /api/menus/popular
 | 존재하지 않는 사용자 | USER_NOT_FOUND | 404 | 요청한 사용자 ID가 존재하지 않음 |
 | 존재하지 않는 메뉴 | MENU_NOT_FOUND | 404 | 요청한 메뉴 ID가 존재하지 않음 |
 | 판매 중이 아닌 메뉴 | MENU_NOT_ON_SALE | 400 | 품절 또는 숨김 상태 메뉴 |
-| 충전 금액 오류 | INVALID_CHARGE_AMOUNT | 400 | 충전 금액이 0 이하 |
+| 충전 금액 오류 | INVALID_CHARGE_AMOUNT | 400 | 충전 금액이 1 미만 또는 100,000 초과 |
 | 포인트 정보 없음 | POINT_NOT_FOUND | 404 | 주문 시 사용자 포인트 정보가 없음 |
 | 잔액 부족 | INSUFFICIENT_POINT | 400 | 포인트 잔액이 주문 금액보다 작음 |
 | 멱등성 키 누락 | IDEMPOTENCY_KEY_REQUIRED | 400 | 주문 요청에 멱등성 키가 없음 |
