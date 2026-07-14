@@ -8,6 +8,7 @@ import java.util.List;
 
 import lombok.RequiredArgsConstructor;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,6 +24,6 @@ public class MenuController {
 	@GetMapping
 	public ResponseEntity<ApiResponse<List<MenuListResponse>>> getMenus() {
 		List<MenuListResponse> response = menuService.getActiveMenus();
-		return ResponseEntity.ok(ApiResponse.ok(response));
+		return ResponseEntity.status(HttpStatus.OK).body(ApiResponse.ok(response));
 	}
 }
