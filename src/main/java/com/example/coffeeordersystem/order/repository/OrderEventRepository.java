@@ -2,6 +2,7 @@ package com.example.coffeeordersystem.order.repository;
 
 import com.example.coffeeordersystem.order.entity.OrderEvent;
 import com.example.coffeeordersystem.order.entity.OrderEventStatus;
+import com.example.coffeeordersystem.ranking.dto.RebuildOrderEvent;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -56,4 +57,18 @@ public interface OrderEventRepository extends JpaRepository<OrderEvent, Long> {
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("select e from OrderEvent e where e.id = :eventId")
 	Optional<OrderEvent> findByIdForUpdate(@Param("eventId") Long eventId);
+
+	@Query("""
+		select new com.example.coffeeordersystem.ranking.dto.RebuildOrderEvent(
+			e.id
+		)
+		from OrderEvent e
+		where e.order.status = com.example.coffeeordersystem.order.entity.OrderStatus.PAID
+		  and e.order.orderedAt >= :start
+		  and e.order.orderedAt < :end
+		""")
+	List<RebuildOrderEvent> findPaidEventsForRankingRebuild(
+		@Param("start") LocalDateTime start,
+		@Param("end") LocalDateTime end
+	);
 }

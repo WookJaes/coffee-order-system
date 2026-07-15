@@ -18,6 +18,7 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -70,6 +71,6 @@ public class Order extends BaseEntity {
 		this.quantity = quantity;
 		this.orderPrice = orderPrice;
 		this.status = OrderStatus.PAID;
-		this.orderedAt = LocalDateTime.now();
+		this.orderedAt = LocalDateTime.now(ZoneId.of("Asia/Seoul"));
 	}
 }

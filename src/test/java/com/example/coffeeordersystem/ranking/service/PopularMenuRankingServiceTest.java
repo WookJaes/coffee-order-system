@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.example.coffeeordersystem.order.repository.OrderRepository;
+import com.example.coffeeordersystem.order.repository.OrderEventRepository;
 import com.example.coffeeordersystem.ranking.dto.DailyMenuOrderCount;
 import com.example.coffeeordersystem.ranking.dto.PopularMenuRanking;
 
@@ -27,12 +28,16 @@ class PopularMenuRankingServiceTest {
 
 	private final StringRedisTemplate redisTemplate = org.mockito.Mockito.mock(StringRedisTemplate.class);
 	private final ZSetOperations<String, String> zSetOperations = org.mockito.Mockito.mock(ZSetOperations.class);
+	private final org.springframework.data.redis.core.ValueOperations<String, String> valueOperations = org.mockito.Mockito.mock(org.springframework.data.redis.core.ValueOperations.class);
 	private final OrderRepository orderRepository = org.mockito.Mockito.mock(OrderRepository.class);
+	private final OrderEventRepository orderEventRepository = org.mockito.Mockito.mock(OrderEventRepository.class);
 	private final Clock clock = Clock.fixed(Instant.parse("2026-07-15T01:00:00Z"), ZoneId.of("Asia/Seoul"));
 	private final PopularMenuRankingService service = new PopularMenuRankingService(
 		redisTemplate,
 		orderRepository,
+		orderEventRepository,
 		Duration.ofDays(8),
+		Duration.ofMinutes(1),
 		clock
 	);
 
@@ -40,6 +45,9 @@ class PopularMenuRankingServiceTest {
 	void 요청일을_포함한_7일_ZSET_점수를_합산해_Top3를_반환한다() {
 		// given
 		when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(redisTemplate.opsForValue().setIfAbsent(org.mockito.ArgumentMatchers.anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+		when(orderEventRepository.findPaidEventsForRankingRebuild(any(), any())).thenReturn(List.of());
 		when(zSetOperations.rangeWithScores(any(), eq(0L), eq(-1L)))
 			.thenReturn(tuples("1", 2, "2", 1))
 			.thenReturn(tuples("1", 3, "3", 5))
@@ -71,6 +79,9 @@ class PopularMenuRankingServiceTest {
 	void Redis가_비어있고_PAID_주문이_있으면_일자별_ZSET을_복구한다() {
 		// given
 		when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.setIfAbsent(org.mockito.ArgumentMatchers.anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+		when(orderEventRepository.findPaidEventsForRankingRebuild(any(), any())).thenReturn(List.of());
 		when(zSetOperations.rangeWithScores(any(), eq(0L), eq(-1L))).thenReturn(Set.of());
 		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
 			new DailyMenuOrderCount(LocalDate.of(2026, 7, 14), 7L, 2L),
@@ -85,10 +96,29 @@ class PopularMenuRankingServiceTest {
 			new PopularMenuRanking(3L, 4L),
 			new PopularMenuRanking(7L, 2L)
 		);
-		verify(zSetOperations).incrementScore("coffee:ranking:2026-07-14", "7", 2D);
-		verify(zSetOperations).incrementScore("coffee:ranking:2026-07-15", "3", 4D);
+		verify(zSetOperations).add("coffee:ranking:2026-07-14", "7", 2D);
+		verify(zSetOperations).add("coffee:ranking:2026-07-15", "3", 4D);
 		verify(redisTemplate).expire("coffee:ranking:2026-07-14", Duration.ofDays(8));
 		verify(redisTemplate).expire("coffee:ranking:2026-07-15", Duration.ofDays(8));
+	}
+
+	@Test
+	void 다른_요청이_재구성_잠금을_보유하면_DB_집계값만_반환하고_Redis를_수정하지_않는다() {
+		// given
+		when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.setIfAbsent(org.mockito.ArgumentMatchers.anyString(), eq("1"), any(Duration.class))).thenReturn(false);
+		when(zSetOperations.rangeWithScores(any(), eq(0L), eq(-1L))).thenReturn(Set.of());
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 3L, 4L)
+		));
+
+		// when
+		List<PopularMenuRanking> rankings = service.getPopularMenuRankings();
+
+		// then
+		assertThat(rankings).containsExactly(new PopularMenuRanking(3L, 4L));
+		verify(zSetOperations, org.mockito.Mockito.never()).add(any(), any(), any(Double.class));
 	}
 
 	private Set<ZSetOperations.TypedTuple<String>> tuples(Object... membersAndScores) {

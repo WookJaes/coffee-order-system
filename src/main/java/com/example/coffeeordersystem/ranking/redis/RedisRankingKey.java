@@ -18,4 +18,8 @@ public final class RedisRankingKey {
 	public static String processedEvent(Long eventId) {
 		return RANKING_PREFIX + "processed:" + eventId;
 	}
+
+	public static String rebuilding() {
+		return RANKING_PREFIX + "rebuilding";
+	}
 }

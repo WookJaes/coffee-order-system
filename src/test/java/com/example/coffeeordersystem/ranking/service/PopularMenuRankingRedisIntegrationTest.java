@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 import com.example.coffeeordersystem.order.repository.OrderRepository;
+import com.example.coffeeordersystem.order.repository.OrderEventRepository;
 import com.example.coffeeordersystem.ranking.dto.DailyMenuOrderCount;
 import com.example.coffeeordersystem.ranking.dto.PopularMenuRanking;
 import com.example.coffeeordersystem.ranking.redis.RedisRankingKey;
@@ -35,6 +36,7 @@ class PopularMenuRankingRedisIntegrationTest {
 	private static LettuceConnectionFactory connectionFactory;
 	private StringRedisTemplate redisTemplate;
 	private OrderRepository orderRepository;
+	private OrderEventRepository orderEventRepository;
 	private PopularMenuRankingService service;
 
 	@BeforeEach
@@ -45,7 +47,8 @@ class PopularMenuRankingRedisIntegrationTest {
 		redisTemplate.afterPropertiesSet();
 		redisTemplate.getConnectionFactory().getConnection().serverCommands().flushDb();
 		orderRepository = org.mockito.Mockito.mock(OrderRepository.class);
-		service = new PopularMenuRankingService(redisTemplate, orderRepository, Duration.ofDays(8),
+		orderEventRepository = org.mockito.Mockito.mock(OrderEventRepository.class);
+		service = new PopularMenuRankingService(redisTemplate, orderRepository, orderEventRepository, Duration.ofDays(8), Duration.ofMinutes(1),
 			Clock.fixed(Instant.parse("2026-07-15T01:00:00Z"), ZoneId.of("Asia/Seoul")));
 	}
 

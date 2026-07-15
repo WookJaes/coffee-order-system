@@ -34,11 +34,14 @@ public class RedisRankingAggregationService {
 		LocalDate date = LocalDate.now(clock);
 		Long result = redisTemplate.execute(
 			processOnceScript,
-			List.of(RedisRankingKey.processedEvent(event.eventId()), RedisRankingKey.dailyRanking(date)),
+			List.of(RedisRankingKey.processedEvent(event.eventId()), RedisRankingKey.dailyRanking(date), RedisRankingKey.rebuilding()),
 			Long.toString(keyTtl.toSeconds()),
 			Long.toString(ORDER_COUNT_INCREMENT),
 			event.menuId().toString()
 		);
+		if (Long.valueOf(-1L).equals(result)) {
+			throw new IllegalStateException("랭킹 Redis 재구성 중입니다.");
+		}
 		return Long.valueOf(1L).equals(result);
 	}
 }

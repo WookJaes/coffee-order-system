@@ -1,14 +1,14 @@
 package com.example.coffeeordersystem.global.config.redis;
 
+import com.example.coffeeordersystem.order.repository.OrderEventRepository;
+import com.example.coffeeordersystem.order.repository.OrderRepository;
 import com.example.coffeeordersystem.ranking.redis.RedisRankingAggregationService;
+import com.example.coffeeordersystem.ranking.service.PopularMenuRankingService;
 
 import java.time.Clock;
 import java.time.ZoneId;
 
 import lombok.RequiredArgsConstructor;
-
-import com.example.coffeeordersystem.order.repository.OrderRepository;
-import com.example.coffeeordersystem.ranking.service.PopularMenuRankingService;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -22,7 +22,7 @@ import org.springframework.data.redis.core.script.RedisScript;
 @Configuration
 @RequiredArgsConstructor
 @EnableConfigurationProperties(RankingRedisProperties.class)
-	public class RankingRedisConfig {
+public class RankingRedisConfig {
 
 	private final RankingRedisProperties properties;
 
@@ -58,8 +58,16 @@ import org.springframework.data.redis.core.script.RedisScript;
 	public PopularMenuRankingService popularMenuRankingService(
 		StringRedisTemplate redisTemplate,
 		OrderRepository orderRepository,
+		OrderEventRepository orderEventRepository,
 		Clock rankingClock
 	) {
-		return new PopularMenuRankingService(redisTemplate, orderRepository, properties.keyTtl(), rankingClock);
+		return new PopularMenuRankingService(
+			redisTemplate,
+			orderRepository,
+			orderEventRepository,
+			properties.keyTtl(),
+			properties.rebuildLockTtl(),
+			rankingClock
+		);
 	}
 }

@@ -33,3 +33,4 @@ outbox:
 ranking:
   redis:
     key-ttl: PT192H
+    rebuild-lock-ttl: PT1M

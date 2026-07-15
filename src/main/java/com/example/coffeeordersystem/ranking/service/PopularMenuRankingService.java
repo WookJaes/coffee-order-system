@@ -1,8 +1,10 @@
 package com.example.coffeeordersystem.ranking.service;
 
 import com.example.coffeeordersystem.order.repository.OrderRepository;
+import com.example.coffeeordersystem.order.repository.OrderEventRepository;
 import com.example.coffeeordersystem.ranking.dto.DailyMenuOrderCount;
 import com.example.coffeeordersystem.ranking.dto.PopularMenuRanking;
+import com.example.coffeeordersystem.ranking.dto.RebuildOrderEvent;
 import com.example.coffeeordersystem.ranking.redis.RedisRankingKey;
 
 import java.time.Clock;
@@ -24,18 +26,24 @@ public class PopularMenuRankingService {
 
 	private final StringRedisTemplate redisTemplate;
 	private final OrderRepository orderRepository;
+	private final OrderEventRepository orderEventRepository;
 	private final Duration keyTtl;
+	private final Duration rebuildLockTtl;
 	private final Clock clock;
 
 	public PopularMenuRankingService(
 		StringRedisTemplate redisTemplate,
 		OrderRepository orderRepository,
+		OrderEventRepository orderEventRepository,
 		Duration keyTtl,
+		Duration rebuildLockTtl,
 		Clock clock
 	) {
 		this.redisTemplate = redisTemplate;
 		this.orderRepository = orderRepository;
+		this.orderEventRepository = orderEventRepository;
 		this.keyTtl = keyTtl;
+		this.rebuildLockTtl = rebuildLockTtl;
 		this.clock = clock;
 	}
 
@@ -70,16 +78,50 @@ public class PopularMenuRankingService {
 	private Map<Long, Long> recoverRankings(LocalDate today) {
 		LocalDateTime start = today.minusDays(RANKING_DAYS - 1L).atStartOfDay();
 		LocalDateTime end = today.plusDays(1).atStartOfDay();
-		List<DailyMenuOrderCount> dailyCounts = orderRepository.findDailyPaidMenuOrderCounts(start, end);
 		Map<Long, Long> totals = new HashMap<>();
-		for (DailyMenuOrderCount dailyCount : dailyCounts) {
-			redisTemplate.opsForZSet().incrementScore(
-				RedisRankingKey.dailyRanking(toLocalDate(dailyCount.orderedDate())),
-				dailyCount.menuId().toString(),
-				dailyCount.orderCount()
-			);
-			redisTemplate.expire(RedisRankingKey.dailyRanking(toLocalDate(dailyCount.orderedDate())), keyTtl);
-			totals.merge(dailyCount.menuId(), dailyCount.orderCount(), Long::sum);
+		Boolean locked = redisTemplate.opsForValue().setIfAbsent(
+			RedisRankingKey.rebuilding(), "1", rebuildLockTtl
+		);
+		if (!Boolean.TRUE.equals(locked)) {
+			List<DailyMenuOrderCount> dailyCounts = orderRepository.findDailyPaidMenuOrderCounts(start, end);
+			for (DailyMenuOrderCount dailyCount : dailyCounts) {
+				totals.merge(dailyCount.menuId(), dailyCount.orderCount(), Long::sum);
+			}
+			return totals;
+		}
+		List<String> restoredMarkerKeys = new java.util.ArrayList<>();
+		List<String> rebuiltRankingKeys = new java.util.ArrayList<>();
+		try {
+			Map<Long, Long> currentRankings = readRedisRankings(today);
+			if (!currentRankings.isEmpty()) {
+				return currentRankings;
+			}
+			List<DailyMenuOrderCount> dailyCounts = orderRepository.findDailyPaidMenuOrderCounts(start, end);
+			List<RebuildOrderEvent> events = orderEventRepository.findPaidEventsForRankingRebuild(start, end);
+			for (RebuildOrderEvent event : events) {
+				String markerKey = RedisRankingKey.processedEvent(event.eventId());
+				Boolean markerCreated = redisTemplate.opsForValue().setIfAbsent(markerKey, "1", keyTtl);
+				if (Boolean.TRUE.equals(markerCreated)) {
+					restoredMarkerKeys.add(markerKey);
+				}
+			}
+			for (DailyMenuOrderCount dailyCount : dailyCounts) {
+				String rankingKey = RedisRankingKey.dailyRanking(toLocalDate(dailyCount.orderedDate()));
+				redisTemplate.opsForZSet().add(
+					rankingKey,
+					dailyCount.menuId().toString(),
+					dailyCount.orderCount()
+				);
+				redisTemplate.expire(rankingKey, keyTtl);
+				rebuiltRankingKeys.add(rankingKey);
+				totals.merge(dailyCount.menuId(), dailyCount.orderCount(), Long::sum);
+			}
+		} catch (RuntimeException exception) {
+			redisTemplate.delete(restoredMarkerKeys);
+			redisTemplate.delete(rebuiltRankingKeys);
+			throw exception;
+		} finally {
+			redisTemplate.delete(RedisRankingKey.rebuilding());
 		}
 		return totals;
 	}
