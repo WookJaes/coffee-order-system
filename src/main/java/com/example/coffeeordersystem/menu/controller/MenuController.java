@@ -2,6 +2,7 @@ package com.example.coffeeordersystem.menu.controller;
 
 import com.example.coffeeordersystem.global.response.ApiResponse;
 import com.example.coffeeordersystem.menu.dto.MenuListResponse;
+import com.example.coffeeordersystem.menu.dto.PopularMenuResponse;
 import com.example.coffeeordersystem.menu.service.MenuService;
 
 import java.util.List;
@@ -24,6 +25,12 @@ public class MenuController {
 	@GetMapping
 	public ResponseEntity<ApiResponse<List<MenuListResponse>>> getMenus() {
 		List<MenuListResponse> response = menuService.getActiveMenus();
+		return ResponseEntity.status(HttpStatus.OK).body(ApiResponse.ok(response));
+	}
+
+	@GetMapping("/popular")
+	public ResponseEntity<ApiResponse<List<PopularMenuResponse>>> getPopularMenus() {
+		List<PopularMenuResponse> response = menuService.getPopularMenus();
 		return ResponseEntity.status(HttpStatus.OK).body(ApiResponse.ok(response));
 	}
 }
