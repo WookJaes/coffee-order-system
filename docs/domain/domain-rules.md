@@ -13,7 +13,7 @@
 - 충전 시 `points` row가 없으면 생성한다.
 - 주문 시 `points` row가 없으면 `POINT_NOT_FOUND`로 실패한다.
 - 충전과 사용은 `point_histories`에 잔액 변동 후 값을 남긴다.
-- 주문 포인트 차감은 `points` row를 `PESSIMISTIC_WRITE`로 조회한 뒤 수행한다.
+- 충전과 주문 결제는 모두 같은 사용자의 `users` row를 `PESSIMISTIC_WRITE`로 먼저 잠근 뒤 `points`를 조회·생성·변경한다. 포인트 행 잠금을 추가로 획득하지 않는다.
 
 ## 주문
 
