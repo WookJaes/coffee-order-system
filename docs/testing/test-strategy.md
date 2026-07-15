@@ -20,7 +20,7 @@
 - 두 Publisher의 같은 이벤트 동시 선점 방지와 오래된 `PROCESSING` 회복
 - Kafka 중복 메시지, Redis 갱신 실패 후 DLT 이동
 - Redis Lua 집계의 날짜별 키·TTL·메뉴 주문 수 증가와 같은 `eventId`의 중복 무증가
-- Testcontainers Redis에서 실제 Lua 실행으로 중복 이벤트의 ZSET 점수 무증가와 마커·랭킹 키 TTL 검증
+- Testcontainers Redis에서 실제 Lua 실행으로 중복 이벤트의 ZSET 점수 무증가와 마커·랭킹 키 TTL 검증. Docker daemon이 없으면 이 테스트는 skip하며, Docker 사용 환경에서는 JUnit 결과의 `skipped=0`을 확인한다.
 - classpath Lua 리소스 로드와 집계 서비스의 스크립트 주입
 - 임베디드 Kafka에서 Redis 실패 시 최초 처리 1회와 재시도 2회(총 3회) 뒤 DLT 이동, 성공 전 offset 미커밋(RECORD ack), 파티션 수와 Consumer 동시성 정합성
 - 최근 7일 Top 3, 동점 정렬, DB 재구성 쿼리
