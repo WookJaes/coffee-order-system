@@ -1,6 +1,7 @@
 package com.example.coffeeordersystem.global.config.kafka;
 
 import com.example.coffeeordersystem.outbox.dto.OrderPaidEvent;
+import com.example.coffeeordersystem.ranking.redis.RankingRebuildInProgressException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -37,6 +38,11 @@ public class RankingKafkaConsumerConfig {
 		DefaultErrorHandler errorHandler = new DefaultErrorHandler(
 			recoverer,
 			new FixedBackOff(properties.retryBackoff().toMillis(), properties.maxRetryAttempts())
+		);
+		errorHandler.setBackOffFunction((record, exception) ->
+			exception instanceof RankingRebuildInProgressException
+				? new FixedBackOff(properties.retryBackoff().toMillis(), FixedBackOff.UNLIMITED_ATTEMPTS)
+				: null
 		);
 		errorHandler.setCommitRecovered(true);
 

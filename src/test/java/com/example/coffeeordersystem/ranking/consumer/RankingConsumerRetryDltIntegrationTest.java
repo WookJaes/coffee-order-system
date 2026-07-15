@@ -7,6 +7,7 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
 import com.example.coffeeordersystem.outbox.dto.OrderPaidEvent;
+import com.example.coffeeordersystem.ranking.redis.RankingRebuildInProgressException;
 import com.example.coffeeordersystem.ranking.redis.RedisRankingAggregationService;
 
 import java.time.Duration;
@@ -21,9 +22,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.support.serializer.JacksonJsonDeserializer;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
+import org.springframework.kafka.test.utils.ContainerTestUtils;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -50,12 +53,23 @@ class RankingConsumerRetryDltIntegrationTest {
 	@Autowired
 	private EmbeddedKafkaBroker embeddedKafkaBroker;
 
+	@Autowired
+	private KafkaListenerEndpointRegistry kafkaListenerEndpointRegistry;
+
 	@MockitoBean
 	private RedisRankingAggregationService aggregationService;
 
 	@AfterEach
 	void resetMock() {
 		org.mockito.Mockito.reset(aggregationService);
+	}
+
+	@org.junit.jupiter.api.BeforeEach
+	void waitForConsumerAssignment() {
+		ContainerTestUtils.waitForAssignment(
+			kafkaListenerEndpointRegistry.getListenerContainers().iterator().next(),
+			embeddedKafkaBroker.getPartitionsPerTopic()
+		);
 	}
 
 	@Test
@@ -77,6 +91,24 @@ class RankingConsumerRetryDltIntegrationTest {
 				.isEqualTo(event);
 			verify(aggregationService, timeout(10_000).times(3)).aggregate(event);
 		}
+	}
+
+	@Test
+	void 재구성_잠금_예외는_기본_재시도_횟수를_넘겨도_DLT로_보내지_않는다() throws Exception {
+		// given
+		OrderPaidEvent event = new OrderPaidEvent(43L, 11L, 3L, 7L, 4_500);
+			doThrow(new RankingRebuildInProgressException())
+			.doThrow(new RankingRebuildInProgressException())
+			.doThrow(new RankingRebuildInProgressException())
+			.doReturn(false)
+			.when(aggregationService).aggregate(event);
+
+		// when
+		kafkaTemplate.send("order-paid", event.orderId().toString(), event).get();
+		verify(aggregationService, timeout(10_000).times(4)).aggregate(event);
+
+		// then
+		verify(aggregationService, timeout(1_000).times(4)).aggregate(event);
 	}
 
 	private Consumer<String, OrderPaidEvent> dltConsumer() {

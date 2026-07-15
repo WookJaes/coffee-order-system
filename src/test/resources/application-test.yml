@@ -34,3 +34,4 @@ ranking:
   redis:
     key-ttl: PT192H
     rebuild-lock-ttl: PT1M
+    rebuild-lock-renew-interval: PT20S

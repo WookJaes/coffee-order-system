@@ -65,3 +65,4 @@ ranking:
   redis:
     key-ttl: ${RANKING_REDIS_KEY_TTL}
     rebuild-lock-ttl: ${RANKING_REDIS_REBUILD_LOCK_TTL}
+    rebuild-lock-renew-interval: ${RANKING_REDIS_REBUILD_LOCK_RENEW_INTERVAL}

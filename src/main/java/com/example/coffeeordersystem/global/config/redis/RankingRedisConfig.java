@@ -7,6 +7,8 @@ import com.example.coffeeordersystem.ranking.service.PopularMenuRankingService;
 
 import java.time.Clock;
 import java.time.ZoneId;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -59,6 +61,43 @@ public class RankingRedisConfig {
 	}
 
 	@Bean
+	public RedisScript<Long> rankingRenewLockScript() {
+		DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+		script.setLocation(new ClassPathResource("scripts/ranking-renew-lock.lua"));
+		script.setResultType(Long.class);
+		return script;
+	}
+
+	@Bean
+	public RedisScript<Long> rankingCleanupRebuildMarkerScript() {
+		DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+		script.setLocation(new ClassPathResource("scripts/ranking-cleanup-rebuild-marker.lua"));
+		script.setResultType(Long.class);
+		return script;
+	}
+
+	@Bean
+	public RedisScript<Long> rankingCleanupRebuildScript() {
+		DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+		script.setLocation(new ClassPathResource("scripts/ranking-cleanup-rebuild.lua"));
+		script.setResultType(Long.class);
+		return script;
+	}
+
+	@Bean
+	public RedisScript<Long> rankingRebuildWriteScript() {
+		DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+		script.setLocation(new ClassPathResource("scripts/ranking-rebuild-write.lua"));
+		script.setResultType(Long.class);
+		return script;
+	}
+
+	@Bean(destroyMethod = "shutdown")
+	public ScheduledExecutorService rankingRebuildLeaseScheduler() {
+		return Executors.newSingleThreadScheduledExecutor();
+	}
+
+	@Bean
 	public Clock rankingClock() {
 		return Clock.system(ZoneId.of("Asia/Seoul"));
 	}
@@ -69,6 +108,11 @@ public class RankingRedisConfig {
 		OrderRepository orderRepository,
 		OrderEventRepository orderEventRepository,
 		@Qualifier("rankingReleaseLockScript") RedisScript<Long> rankingReleaseLockScript,
+		@Qualifier("rankingRenewLockScript") RedisScript<Long> rankingRenewLockScript,
+		@Qualifier("rankingCleanupRebuildMarkerScript") RedisScript<Long> rankingCleanupRebuildMarkerScript,
+		@Qualifier("rankingCleanupRebuildScript") RedisScript<Long> rankingCleanupRebuildScript,
+		@Qualifier("rankingRebuildWriteScript") RedisScript<Long> rankingRebuildWriteScript,
+		ScheduledExecutorService rankingRebuildLeaseScheduler,
 		Clock rankingClock
 	) {
 		return new PopularMenuRankingService(
@@ -77,7 +121,13 @@ public class RankingRedisConfig {
 			orderEventRepository,
 			properties.keyTtl(),
 			properties.rebuildLockTtl(),
+			properties.rebuildLockRenewInterval(),
 			rankingReleaseLockScript,
+			rankingRenewLockScript,
+			rankingCleanupRebuildMarkerScript,
+			rankingCleanupRebuildScript,
+			rankingRebuildWriteScript,
+			rankingRebuildLeaseScheduler,
 			rankingClock
 		);
 	}
