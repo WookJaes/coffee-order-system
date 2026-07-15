@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 
 import com.example.coffeeordersystem.menu.entity.Menu;
 import com.example.coffeeordersystem.order.entity.Order;
+import com.example.coffeeordersystem.order.entity.OrderStatus;
 import com.example.coffeeordersystem.point.entity.Point;
 import com.example.coffeeordersystem.user.entity.User;
 
@@ -25,7 +26,7 @@ class OrderCreateResponseTest {
 		given(order.getMenu()).willReturn(menu);
 		given(order.getOrderPrice()).willReturn(4_500);
 		given(order.getQuantity()).willReturn(1);
-		given(order.getStatus()).willReturn(com.example.coffeeordersystem.order.entity.OrderStatus.PAID);
+		given(order.getStatus()).willReturn(OrderStatus.PAID);
 		given(user.getId()).willReturn(1L);
 		given(menu.getId()).willReturn(1L);
 		given(point.getBalance()).willReturn(5_500);
