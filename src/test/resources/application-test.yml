@@ -29,3 +29,7 @@ outbox:
     max-retry-count: 3
     retry-backoff: PT0S
     processing-timeout: PT1M
+
+ranking:
+  redis:
+    key-ttl: PT192H
