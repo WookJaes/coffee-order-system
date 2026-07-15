@@ -19,6 +19,9 @@
 - Outbox `PENDING` 발행 성공 후 `SENT`, 발행 실패 뒤 backoff·재시도 횟수·`FAILED` 전이
 - 두 Publisher의 같은 이벤트 동시 선점 방지와 오래된 `PROCESSING` 회복
 - Kafka 중복 메시지, Redis 갱신 실패 후 DLT 이동
+- Redis Lua 집계의 날짜별 키·TTL·메뉴 주문 수 증가와 같은 `eventId`의 중복 무증가
+- classpath Lua 리소스 로드와 집계 서비스의 스크립트 주입
+- 임베디드 Kafka에서 Redis 실패 시 최초 처리 1회와 재시도 2회(총 3회) 뒤 DLT 이동, 성공 전 offset 미커밋(RECORD ack), 파티션 수와 Consumer 동시성 정합성
 - 최근 7일 Top 3, 동점 정렬, DB 재구성 쿼리
 
 코드, DB migration, 인프라 설정을 변경한 작업은 변경 범위의 focused test와 전체 `./gradlew test`를 실행한다. 실제 실행 결과는 `verification-log.md`에 기록한다.
