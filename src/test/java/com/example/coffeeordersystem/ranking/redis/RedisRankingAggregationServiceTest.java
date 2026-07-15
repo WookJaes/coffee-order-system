@@ -51,7 +51,8 @@ class RedisRankingAggregationServiceTest {
 		assertThat(keyCaptor.getValue()).containsExactly(
 			"coffee:ranking:processed:42",
 			"coffee:ranking:2026-07-15",
-			"coffee:ranking:rebuilding"
+			"coffee:ranking:rebuilding",
+			"coffee:ranking:status:2026-07-15"
 		);
 		assertThat(argumentCaptor.getValue()).containsExactly("691200", "1", "7");
 	}

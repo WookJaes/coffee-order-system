@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -48,7 +49,10 @@ class PopularMenuRankingRedisIntegrationTest {
 		redisTemplate.getConnectionFactory().getConnection().serverCommands().flushDb();
 		orderRepository = org.mockito.Mockito.mock(OrderRepository.class);
 		orderEventRepository = org.mockito.Mockito.mock(OrderEventRepository.class);
-		service = new PopularMenuRankingService(redisTemplate, orderRepository, orderEventRepository, Duration.ofDays(8), Duration.ofMinutes(1),
+		DefaultRedisScript<Long> releaseLockScript = new DefaultRedisScript<>();
+		releaseLockScript.setScriptText("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0");
+		releaseLockScript.setResultType(Long.class);
+		service = new PopularMenuRankingService(redisTemplate, orderRepository, orderEventRepository, Duration.ofDays(8), Duration.ofMinutes(1), releaseLockScript,
 			Clock.fixed(Instant.parse("2026-07-15T01:00:00Z"), ZoneId.of("Asia/Seoul")));
 	}
 
@@ -65,6 +69,10 @@ class PopularMenuRankingRedisIntegrationTest {
 		redisTemplate.opsForZSet().incrementScore(RedisRankingKey.dailyRanking(LocalDate.of(2026, 7, 15)), "8", 2);
 		redisTemplate.opsForZSet().incrementScore(RedisRankingKey.dailyRanking(LocalDate.of(2026, 7, 14)), "8", 3);
 		redisTemplate.opsForZSet().incrementScore(RedisRankingKey.dailyRanking(LocalDate.of(2026, 7, 14)), "2", 5);
+		for (int offset = 0; offset < 7; offset++) {
+			LocalDate date = LocalDate.of(2026, 7, 15).minusDays(offset);
+			redisTemplate.opsForValue().set(RedisRankingKey.dailyStatus(date), offset < 2 ? "DATA" : "EMPTY", Duration.ofDays(8));
+		}
 
 		// when
 		List<PopularMenuRanking> rankings = service.getPopularMenuRankings();

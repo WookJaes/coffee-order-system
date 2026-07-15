@@ -16,9 +16,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 
 public class PopularMenuRankingService {
 
@@ -29,6 +31,7 @@ public class PopularMenuRankingService {
 	private final OrderEventRepository orderEventRepository;
 	private final Duration keyTtl;
 	private final Duration rebuildLockTtl;
+	private final RedisScript<Long> releaseLockScript;
 	private final Clock clock;
 
 	public PopularMenuRankingService(
@@ -37,6 +40,7 @@ public class PopularMenuRankingService {
 		OrderEventRepository orderEventRepository,
 		Duration keyTtl,
 		Duration rebuildLockTtl,
+		RedisScript<Long> releaseLockScript,
 		Clock clock
 	) {
 		this.redisTemplate = redisTemplate;
@@ -44,13 +48,14 @@ public class PopularMenuRankingService {
 		this.orderEventRepository = orderEventRepository;
 		this.keyTtl = keyTtl;
 		this.rebuildLockTtl = rebuildLockTtl;
+		this.releaseLockScript = releaseLockScript;
 		this.clock = clock;
 	}
 
 	public List<PopularMenuRanking> getPopularMenuRankings() {
 		LocalDate today = LocalDate.now(clock);
 		Map<Long, Long> orderCounts = readRedisRankings(today);
-		if (orderCounts.isEmpty()) {
+		if (!isRankingComplete(today)) {
 			orderCounts = recoverRankings(today);
 		}
 		return toTopRankings(orderCounts);
@@ -78,9 +83,10 @@ public class PopularMenuRankingService {
 	private Map<Long, Long> recoverRankings(LocalDate today) {
 		LocalDateTime start = today.minusDays(RANKING_DAYS - 1L).atStartOfDay();
 		LocalDateTime end = today.plusDays(1).atStartOfDay();
+		String lockToken = UUID.randomUUID().toString();
 		Map<Long, Long> totals = new HashMap<>();
 		Boolean locked = redisTemplate.opsForValue().setIfAbsent(
-			RedisRankingKey.rebuilding(), "1", rebuildLockTtl
+			RedisRankingKey.rebuilding(), lockToken, rebuildLockTtl
 		);
 		if (!Boolean.TRUE.equals(locked)) {
 			List<DailyMenuOrderCount> dailyCounts = orderRepository.findDailyPaidMenuOrderCounts(start, end);
@@ -90,14 +96,15 @@ public class PopularMenuRankingService {
 			return totals;
 		}
 		List<String> restoredMarkerKeys = new java.util.ArrayList<>();
-		List<String> rebuiltRankingKeys = new java.util.ArrayList<>();
 		try {
 			Map<Long, Long> currentRankings = readRedisRankings(today);
-			if (!currentRankings.isEmpty()) {
+			if (isRankingComplete(today)) {
 				return currentRankings;
 			}
 			List<DailyMenuOrderCount> dailyCounts = orderRepository.findDailyPaidMenuOrderCounts(start, end);
 			List<RebuildOrderEvent> events = orderEventRepository.findPaidEventsForRankingRebuild(start, end);
+			List<String> dailyKeys = dailyKeys(today);
+			redisTemplate.delete(dailyKeys);
 			for (RebuildOrderEvent event : events) {
 				String markerKey = RedisRankingKey.processedEvent(event.eventId());
 				Boolean markerCreated = redisTemplate.opsForValue().setIfAbsent(markerKey, "1", keyTtl);
@@ -113,17 +120,55 @@ public class PopularMenuRankingService {
 					dailyCount.orderCount()
 				);
 				redisTemplate.expire(rankingKey, keyTtl);
-				rebuiltRankingKeys.add(rankingKey);
 				totals.merge(dailyCount.menuId(), dailyCount.orderCount(), Long::sum);
+			}
+			for (int offset = 0; offset < RANKING_DAYS; offset++) {
+				LocalDate date = today.minusDays(offset);
+				String status = totals.isEmpty() ? "EMPTY" : hasDailyCount(dailyCounts, date) ? "DATA" : "EMPTY";
+				redisTemplate.opsForValue().set(RedisRankingKey.dailyStatus(date), status, keyTtl);
 			}
 		} catch (RuntimeException exception) {
 			redisTemplate.delete(restoredMarkerKeys);
-			redisTemplate.delete(rebuiltRankingKeys);
+			redisTemplate.delete(dailyKeys(today));
 			throw exception;
 		} finally {
-			redisTemplate.delete(RedisRankingKey.rebuilding());
+			releaseRebuildLock(lockToken);
 		}
 		return totals;
+	}
+
+	private boolean isRankingComplete(LocalDate today) {
+		for (int offset = 0; offset < RANKING_DAYS; offset++) {
+			LocalDate date = today.minusDays(offset);
+			String status = redisTemplate.opsForValue().get(RedisRankingKey.dailyStatus(date));
+			Boolean rankingKeyExists = redisTemplate.hasKey(RedisRankingKey.dailyRanking(date));
+			if ("DATA".equals(status) && Boolean.TRUE.equals(rankingKeyExists)) {
+				continue;
+			}
+			if ("EMPTY".equals(status) && !Boolean.TRUE.equals(rankingKeyExists)) {
+				continue;
+			}
+			return false;
+		}
+		return true;
+	}
+
+	private boolean hasDailyCount(List<DailyMenuOrderCount> dailyCounts, LocalDate date) {
+		return dailyCounts.stream().anyMatch(dailyCount -> toLocalDate(dailyCount.orderedDate()).equals(date));
+	}
+
+	private List<String> dailyKeys(LocalDate today) {
+		List<String> keys = new java.util.ArrayList<>();
+		for (int offset = 0; offset < RANKING_DAYS; offset++) {
+			LocalDate date = today.minusDays(offset);
+			keys.add(RedisRankingKey.dailyRanking(date));
+			keys.add(RedisRankingKey.dailyStatus(date));
+		}
+		return keys;
+	}
+
+	private void releaseRebuildLock(String lockToken) {
+		redisTemplate.execute(releaseLockScript, List.of(RedisRankingKey.rebuilding()), lockToken);
 	}
 
 	private LocalDate toLocalDate(Object orderedDate) {

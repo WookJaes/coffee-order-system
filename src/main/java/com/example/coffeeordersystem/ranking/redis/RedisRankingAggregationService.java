@@ -34,7 +34,12 @@ public class RedisRankingAggregationService {
 		LocalDate date = LocalDate.now(clock);
 		Long result = redisTemplate.execute(
 			processOnceScript,
-			List.of(RedisRankingKey.processedEvent(event.eventId()), RedisRankingKey.dailyRanking(date), RedisRankingKey.rebuilding()),
+			List.of(
+				RedisRankingKey.processedEvent(event.eventId()),
+				RedisRankingKey.dailyRanking(date),
+				RedisRankingKey.rebuilding(),
+				RedisRankingKey.dailyStatus(date)
+			),
 			Long.toString(keyTtl.toSeconds()),
 			Long.toString(ORDER_COUNT_INCREMENT),
 			event.menuId().toString()

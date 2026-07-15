@@ -38,6 +38,7 @@ class PopularMenuRankingServiceTest {
 		orderEventRepository,
 		Duration.ofDays(8),
 		Duration.ofMinutes(1),
+		new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
 		clock
 	);
 
@@ -46,6 +47,8 @@ class PopularMenuRankingServiceTest {
 		// given
 		when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
 		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.get(org.mockito.ArgumentMatchers.anyString())).thenReturn("DATA");
+		when(redisTemplate.hasKey(org.mockito.ArgumentMatchers.anyString())).thenReturn(true);
 		when(redisTemplate.opsForValue().setIfAbsent(org.mockito.ArgumentMatchers.anyString(), eq("1"), any(Duration.class))).thenReturn(true);
 		when(orderEventRepository.findPaidEventsForRankingRebuild(any(), any())).thenReturn(List.of());
 		when(zSetOperations.rangeWithScores(any(), eq(0L), eq(-1L)))
@@ -80,7 +83,9 @@ class PopularMenuRankingServiceTest {
 		// given
 		when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
 		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-		when(valueOperations.setIfAbsent(org.mockito.ArgumentMatchers.anyString(), eq("1"), any(Duration.class))).thenReturn(true);
+		when(valueOperations.setIfAbsent(
+			org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), any(Duration.class)
+		)).thenReturn(true);
 		when(orderEventRepository.findPaidEventsForRankingRebuild(any(), any())).thenReturn(List.of());
 		when(zSetOperations.rangeWithScores(any(), eq(0L), eq(-1L))).thenReturn(Set.of());
 		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
@@ -100,6 +105,32 @@ class PopularMenuRankingServiceTest {
 		verify(zSetOperations).add("coffee:ranking:2026-07-15", "3", 4D);
 		verify(redisTemplate).expire("coffee:ranking:2026-07-14", Duration.ofDays(8));
 		verify(redisTemplate).expire("coffee:ranking:2026-07-15", Duration.ofDays(8));
+	}
+
+	@Test
+	void DATA_상태의_일자별_ZSET이_하나라도_없으면_DB로_전체_기간을_복구한다() {
+		// given
+		when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.get(org.mockito.ArgumentMatchers.anyString())).thenReturn("DATA");
+		when(redisTemplate.hasKey(org.mockito.ArgumentMatchers.anyString())).thenAnswer(invocation ->
+			!invocation.getArgument(0, String.class).endsWith("2026-07-09")
+		);
+		when(valueOperations.setIfAbsent(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), any(Duration.class)))
+			.thenReturn(true);
+		when(orderEventRepository.findPaidEventsForRankingRebuild(any(), any())).thenReturn(List.of());
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 3L, 4L)
+		));
+		when(zSetOperations.rangeWithScores(any(), eq(0L), eq(-1L))).thenReturn(Set.of());
+
+		// when
+		List<PopularMenuRanking> rankings = service.getPopularMenuRankings();
+
+		// then
+		assertThat(rankings).containsExactly(new PopularMenuRanking(3L, 4L));
+		verify(redisTemplate).delete(org.mockito.ArgumentMatchers.<String>anyList());
+		verify(zSetOperations).add("coffee:ranking:2026-07-15", "3", 4D);
 	}
 
 	@Test
