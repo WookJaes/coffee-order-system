@@ -24,6 +24,9 @@ spring:
       port: ${REDIS_PORT}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
 management:
   endpoints:
@@ -33,3 +36,12 @@ management:
   endpoint:
     health:
       show-details: never
+
+outbox:
+  publisher:
+    topic: ${OUTBOX_TOPIC}
+    fixed-delay: ${OUTBOX_PUBLISHER_FIXED_DELAY}
+    batch-size: ${OUTBOX_PUBLISHER_BATCH_SIZE}
+    max-retry-count: ${OUTBOX_PUBLISHER_MAX_RETRY_COUNT}
+    retry-backoff: ${OUTBOX_PUBLISHER_RETRY_BACKOFF}
+    processing-timeout: ${OUTBOX_PUBLISHER_PROCESSING_TIMEOUT}

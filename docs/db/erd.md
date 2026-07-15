@@ -65,6 +65,10 @@ erDiagram
         int payment_amount
         varchar status
         int retry_count
+        datetime processing_started_at
+        datetime next_attempt_at
+        varchar processing_token
+        varchar last_error
         datetime created_at
         datetime updated_at
     }
@@ -77,10 +81,10 @@ erDiagram
 | `points` | 사용자 현재 잔액 | `user_id` unique, `balance >= 0` |
 | `point_histories` | 충전 및 사용 근거 | `user_id` FK, 사용 이력만 `order_id` FK (충전 이력은 null) |
 | `orders` | 주문 원장과 수량·총 결제금액 스냅샷 | `quantity > 0`, `(user_id, idempotency_key)` unique |
-| `order_events` | Kafka 발행 Outbox | `order_id` unique로 주문과 1:1, 이번 범위의 초기 상태는 `PENDING` |
+| `order_events` | Kafka 발행 Outbox | `order_id` unique로 주문과 1:1, `PENDING/PROCESSING/SENT/FAILED` 상태와 재시도·선점 정보를 보관 |
 
 모든 엔티티는 `BaseEntity`를 상속하여 `created_at`, `updated_at`을 공통으로 관리한다.
 
 상태와 유형은 Java enum을 `@Enumerated(EnumType.STRING)`으로 저장한다. DB 컬럼 타입은 `VARCHAR`다.
 
-주요 인덱스는 `points(user_id)`, `orders(user_id, idempotency_key)`, `orders(status, ordered_at)`, `order_events(status, created_at)`를 기준으로 검토한다.
+주요 인덱스는 `points(user_id)`, `orders(user_id, idempotency_key)`, `orders(status, ordered_at)`, `order_events(status, next_attempt_at, id)`, `order_events(processing_token)`를 사용한다.

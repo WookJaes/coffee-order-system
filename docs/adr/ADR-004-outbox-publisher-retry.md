@@ -2,7 +2,7 @@
 
 ## 상태
 
-Accepted. 결정일: 2026-07-14.
+Implemented. 결정일: 2026-07-14, 구현일: 2026-07-15.
 
 ## 맥락
 
@@ -10,9 +10,9 @@ Issue #6은 주문 트랜잭션에서 저장된 `order_events`를 `order-paid` K
 
 ## 결정
 
-별도 Outbox Publisher가 주기적으로 발행 대상을 조회한다. 대상 선점은 DB 트랜잭션에서 수행하며, `PENDING -> PROCESSING` 상태 전이와 시도 횟수 증가를 원자적으로 저장한 뒤 Kafka 발행을 수행한다.
+별도 Outbox Publisher가 주기적으로 발행 대상을 조회한다. 후보 조회 뒤 `WHERE id = ? AND status = PENDING` 조건부 DB 갱신으로 `PENDING -> PROCESSING` 선점을 원자적으로 저장한 뒤 Kafka 발행을 수행한다. 선점 토큰을 저장해 같은 실행이 선점한 이벤트만 완료 처리한다.
 
-발행 성공 시 `SENT`로, 실패 시 재시도 가능 횟수가 남아 있으면 `PENDING`으로 되돌리고 다음 시도 시각을 늦춘다. 재시도 한도를 넘긴 이벤트는 `FAILED`로 전이하고 DLT 또는 운영자 재처리 대상으로 남긴다. 따라서 Issue #6 구현 시 `PROCESSING`, 재시도 시각, 실패 사유를 저장할 스키마 확장이 필요하다.
+발행 성공 시 `SENT`로, 실패 시 실패 횟수를 증가시킨다. 초기 발행 실패 뒤 최대 재시도 횟수를 초과하면 `FAILED`, 남아 있으면 `PENDING`으로 되돌리고 다음 시도 시각을 늦춘다. 기본 최대 재시도 횟수는 3회이므로 총 네 번째 실패에서 `FAILED`다. 따라서 Issue #6 구현에는 `PROCESSING`, 선점 시각·토큰, 재시도 시각, 실패 사유를 저장할 스키마 확장이 포함된다.
 
 ## 근거
 
@@ -31,6 +31,13 @@ Issue #6은 주문 트랜잭션에서 저장된 `order_events`를 `order-paid` K
 ## 결과 (트레이드오프)
 
 `PROCESSING` 상태에서 프로세스가 중단될 수 있으므로 Publisher는 선점 시각이 오래된 이벤트를 다시 `PENDING`으로 복구하는 정책을 가져야 한다. Kafka는 at-least-once 전송이므로 Consumer는 중복을 처리해야 하며, 이 결정은 ADR-005와 함께 적용한다.
+
+### 구현 내용
+
+- `OutboxEventClaimService`는 짧은 `REQUIRES_NEW` 트랜잭션에서 오래된 `PROCESSING`을 복구하고 조건부 갱신으로 선점한다.
+- `OutboxPublisherService`는 트랜잭션 밖에서 `KafkaTemplate`의 완료를 기다리고 메시지 키로 `orderId`를 사용한다.
+- `OutboxEventCompletionService`는 짧은 비관적 잠금 트랜잭션에서 선점 토큰을 재확인한 후 `SENT` 또는 실패 상태를 기록한다.
+- `outbox.publisher.*` 설정으로 토픽, 주기, 배치 크기, 최대 실패 횟수, backoff, 처리 제한 시간을 조정한다.
 
 ## 검증 계획
 

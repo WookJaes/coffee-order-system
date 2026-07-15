@@ -93,15 +93,17 @@ Optional<Point> findByUserIdForUpdate(Long userId);
 
 ```text
 주문/결제 성공
--> order_events에 PENDING 이벤트 저장 (현재 구현)
--> Kafka topic(order-paid)에 주문 완료 이벤트 발행 (후속 구현)
+-> order_events에 PENDING 이벤트 저장
+-> Outbox Publisher가 Kafka topic(order-paid)에 주문 완료 이벤트 발행
 -> product-ranking-group: Redis ZSET에 메뉴별 주문 수 누적
 -> payment-history-group: 결제/주문 히스토리 저장 또는 검증
 ```
 
 주문 트랜잭션 안에서 Kafka를 직접 호출하면 Kafka 장애가 주문 실패로 전파될 수 있다. 반대로 주문 저장 후 Kafka 발행만 수행하다가 실패하면 주문 데이터가 수집 플랫폼으로 전달되지 않고 유실될 수 있다.
 
-이를 해결하기 위해 주문 성공 시 `order_events` 테이블에 전송 대상 이벤트를 함께 저장한다. 이후 별도 발행 로직이 `PENDING` 이벤트를 Kafka로 발행하고, 성공 시 `SENT`, 실패 시 `FAILED`로 상태를 관리한다.
+이를 해결하기 위해 주문 성공 시 `order_events` 테이블에 전송 대상 이벤트를 함께 저장한다. 별도 Publisher는 조건부 DB 갱신으로 `PENDING -> PROCESSING`을 선점하고 트랜잭션 밖에서 Kafka를 발행한다. 성공 시 `SENT`, 실패 시 실패 횟수를 증가시켜 backoff 뒤 `PENDING`으로 되돌리거나 초기 발행 뒤 최대 재시도 횟수를 초과하면 `FAILED`로 상태를 관리한다. 오래된 `PROCESSING` 이벤트는 다음 Publisher 실행에서 회복한다.
+
+발행 메시지는 `eventId`, `orderId`, `userId`, `menuId`, `paymentAmount` JSON 필드를 가지며, Kafka 메시지 키는 주문 단위 순서를 위한 `orderId` 문자열이다. 기본 토픽은 `order-paid`이고 `OUTBOX_TOPIC`, `OUTBOX_PUBLISHER_FIXED_DELAY`, `OUTBOX_PUBLISHER_BATCH_SIZE`, `OUTBOX_PUBLISHER_MAX_RETRY_COUNT`, `OUTBOX_PUBLISHER_RETRY_BACKOFF`, `OUTBOX_PUBLISHER_PROCESSING_TIMEOUT`으로 운영 환경에서 조정한다.
 
 Kafka Consumer는 기본적으로 at-least-once 방식으로 동작하므로 같은 메시지가 두 번 이상 처리될 수 있다. 따라서 DB에 저장되는 중요한 데이터는 `orderId` 또는 이벤트 ID 기준으로 멱등 처리한다. 반복 재시도 후에도 처리하지 못한 메시지는 DLT(Dead Letter Topic)로 이동시켜 운영자가 원인을 확인하고 재처리할 수 있도록 한다.
 
@@ -343,6 +345,10 @@ erDiagram
 | payment_amount | INT | Integer | 결제 금액 |
 | status | VARCHAR | OrderEventStatus | PENDING |
 | retry_count | INT | Integer | 재시도 횟수 |
+| processing_started_at | DATETIME | LocalDateTime | 선점 시작 시각 |
+| next_attempt_at | DATETIME | LocalDateTime | 다음 발행 가능 시각 |
+| processing_token | VARCHAR | String | Publisher 선점 토큰 |
+| last_error | VARCHAR | String | 마지막 Kafka 발행 실패 사유 |
 | created_at | DATETIME | LocalDateTime | 생성 시각 |
 | updated_at | DATETIME | LocalDateTime | 수정 시각 |
 
@@ -465,7 +471,7 @@ Idempotency-Key: 7f4f0c2e-2d3e-4b1f-9e45-aaaa1111bbbb
 }
 ```
 
-`quantity`는 1 이상의 정수다. 결제 금액은 주문 시점 메뉴 가격과 수량의 곱이며 `orders.order_price`, 포인트 사용 이력, Outbox의 결제금액에 같은 총액으로 저장된다. 동일 사용자·동일 `Idempotency-Key`로 같은 메뉴와 수량을 재요청하면 기존 주문 결과를 반환하며 포인트를 중복 차감하지 않는다. 이때 `remainingPoint`는 주문의 `USE` 이력에 저장한 차감 후 잔액으로 복원한다. 같은 키에 다른 메뉴 또는 수량을 사용하면 HTTP 409으로 실패한다. 주문 성공 시 `orders`, 포인트 차감, `point_histories`의 `USE` 이력, `order_events`의 `PENDING` 이벤트가 하나의 트랜잭션으로 저장된다. Kafka 발행은 현재 API 범위에 포함하지 않는다.
+`quantity`는 1 이상의 정수다. 결제 금액은 주문 시점 메뉴 가격과 수량의 곱이며 `orders.order_price`, 포인트 사용 이력, Outbox의 결제금액에 같은 총액으로 저장된다. 동일 사용자·동일 `Idempotency-Key`로 같은 메뉴와 수량을 재요청하면 기존 주문 결과를 반환하며 포인트를 중복 차감하지 않는다. 이때 `remainingPoint`는 주문의 `USE` 이력에 저장한 차감 후 잔액으로 복원한다. 같은 키에 다른 메뉴 또는 수량을 사용하면 HTTP 409으로 실패한다. 주문 성공 시 `orders`, 포인트 차감, `point_histories`의 `USE` 이력, `order_events`의 `PENDING` 이벤트가 하나의 트랜잭션으로 저장된다. Kafka 발행은 요청 트랜잭션 밖의 Scheduler가 처리하므로 Kafka 장애가 주문 API를 롤백하지 않는다.
 <br/>
 
 #### 인기 메뉴 목록 조회 API
