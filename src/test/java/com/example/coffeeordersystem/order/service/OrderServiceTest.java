@@ -16,6 +16,8 @@ import com.example.coffeeordersystem.point.entity.Point;
 import com.example.coffeeordersystem.point.entity.PointHistoryType;
 import com.example.coffeeordersystem.point.repository.PointHistoryRepository;
 import com.example.coffeeordersystem.point.repository.PointRepository;
+import com.example.coffeeordersystem.point.service.PointService;
+import com.example.coffeeordersystem.point.dto.PointChargeRequest;
 import com.example.coffeeordersystem.user.entity.User;
 import com.example.coffeeordersystem.user.repository.UserRepository;
 
@@ -41,6 +43,9 @@ class OrderServiceTest {
 
 	@Autowired
 	private OrderService orderService;
+
+	@Autowired
+	private PointService pointService;
 
 	@Autowired
 	private UserRepository userRepository;
@@ -271,6 +276,76 @@ class OrderServiceTest {
 		assertThat(orderRepository.count()).isEqualTo(1);
 		assertThat(pointHistoryRepository.count()).isEqualTo(1);
 		assertThat(orderEventRepository.count()).isEqualTo(1);
+	}
+
+	@Test
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	@DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
+	void 같은_사용자의_충전과_주문이_교차해도_잔액과_이력이_정합성을_유지한다() throws Exception {
+		// given
+		User user = userRepository.saveAndFlush(new User("교차 동시성 사용자"));
+		Menu menu = menuRepository.saveAndFlush(new Menu("교차 동시성 커피", 4_500, MenuStatus.ACTIVE));
+		pointRepository.saveAndFlush(new Point(user, 10_000));
+
+		// when
+		List<Throwable> failures = runConcurrently(10, index -> {
+			if (index % 2 == 0) {
+				pointService.charge(new PointChargeRequest(user.getId(), 1_000));
+				return;
+			}
+			orderService.create(new OrderCreateRequest(user.getId(), menu.getId(), 1), "cross-order-" + index);
+		});
+
+		// then
+		assertThat(failures)
+			.allSatisfy(failure -> assertThat(((BusinessException)failure).getErrorCode())
+				.isEqualTo(ErrorCode.INSUFFICIENT_POINT));
+		int chargeTotal = pointHistoryRepository.findAll().stream()
+			.filter(history -> history.getType() == PointHistoryType.CHARGE)
+			.mapToInt(history -> history.getAmount())
+			.sum();
+		int useTotal = pointHistoryRepository.findAll().stream()
+			.filter(history -> history.getType() == PointHistoryType.USE)
+			.mapToInt(history -> history.getAmount())
+			.sum();
+		int balance = pointRepository.findByUserId(user.getId()).orElseThrow().getBalance();
+		assertThat(balance).isEqualTo(10_000 + chargeTotal - useTotal).isGreaterThanOrEqualTo(0);
+		assertThat(pointHistoryRepository.findAll().stream()
+			.filter(history -> history.getType() == PointHistoryType.CHARGE))
+			.hasSize(5);
+		assertThat(pointHistoryRepository.findAll().stream()
+			.filter(history -> history.getType() == PointHistoryType.USE))
+			.hasSize((int)orderRepository.count());
+		assertThat(orderEventRepository.count()).isEqualTo(orderRepository.count());
+	}
+
+	@Test
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	@DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
+	void 교차_실행_중_잔액_부족_주문은_주문_사용이력_Outbox를_남기지_않는다() throws Exception {
+		// given
+		User user = userRepository.saveAndFlush(new User("교차 잔액 부족 사용자"));
+		Menu menu = menuRepository.saveAndFlush(new Menu("교차 잔액 부족 커피", 4_500, MenuStatus.ACTIVE));
+		pointRepository.saveAndFlush(new Point(user, 0));
+
+		// when
+		List<Throwable> failures = runConcurrently(2, index -> {
+			if (index == 0) {
+				pointService.charge(new PointChargeRequest(user.getId(), 1_000));
+				return;
+			}
+			orderService.create(new OrderCreateRequest(user.getId(), menu.getId(), 1), "insufficient-cross-order");
+		});
+
+		// then
+		assertThat(failures).singleElement()
+			.satisfies(failure -> assertThat(((BusinessException)failure).getErrorCode())
+				.isEqualTo(ErrorCode.INSUFFICIENT_POINT));
+		assertThat(pointRepository.findByUserId(user.getId()).orElseThrow().getBalance()).isEqualTo(1_000);
+		assertThat(pointHistoryRepository.findAll()).singleElement()
+			.satisfies(history -> assertThat(history.getType()).isEqualTo(PointHistoryType.CHARGE));
+		assertThat(orderRepository.count()).isZero();
+		assertThat(orderEventRepository.count()).isZero();
 	}
 
 	@Test

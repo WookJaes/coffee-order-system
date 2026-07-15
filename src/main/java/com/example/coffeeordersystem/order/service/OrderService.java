@@ -46,12 +46,12 @@ public class OrderService {
 			return existingOrderResponse.get();
 		}
 
-		User user = findUser(request.userId());
+		User user = findUserForUpdate(request.userId());
 		Menu menu = findMenu(request.menuId());
 		validateMenuStatus(menu);
 		validateQuantity(request.quantity());
 		int paymentAmount = calculatePaymentAmount(menu.getPrice(), request.quantity());
-		Point point = findPointForUpdate(user);
+		Point point = findPoint(user);
 
 		existingOrderResponse = findExistingOrderResponse(request, idempotencyKey);
 		if (existingOrderResponse.isPresent()) {
@@ -77,8 +77,8 @@ public class OrderService {
 			.map(order -> getExistingOrderResponse(order, request.menuId(), request.quantity()));
 	}
 
-	private User findUser(Long userId) {
-		return userRepository.findById(userId)
+	private User findUserForUpdate(Long userId) {
+		return userRepository.findByIdWithPessimisticLock(userId)
 			.orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 	}
 
@@ -87,8 +87,8 @@ public class OrderService {
 			.orElseThrow(() -> new BusinessException(ErrorCode.MENU_NOT_FOUND));
 	}
 
-	private Point findPointForUpdate(User user) {
-		return pointRepository.findByUserIdForUpdate(user.getId())
+	private Point findPoint(User user) {
+		return pointRepository.findByUserId(user.getId())
 			.orElseThrow(() -> new BusinessException(ErrorCode.POINT_NOT_FOUND));
 	}
 
