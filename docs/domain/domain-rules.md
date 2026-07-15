@@ -37,5 +37,7 @@
 - `orders`는 주문과 인기 메뉴의 원본 데이터다.
 - `order_events`는 Kafka 발행 대상 Outbox다.
 - Redis ZSET은 조회 최적화를 위한 파생 데이터다.
-- Consumer는 이벤트 ID 기준으로 중복 처리하지 않는다.
+- Consumer는 이벤트 ID 기준으로 중복 소비를 방지한다.
+- Consumer는 Redis 원자 연산으로 중복 마커 등록과 날짜별 ZSET 주문 수 증가를 함께 처리한다.
+- Redis 처리 실패는 Consumer 예외로 전파해 Kafka 재시도·DLT 정책을 적용한다.
 - 최근 7일 랭킹의 동점은 메뉴 ID 오름차순으로 결정한다.

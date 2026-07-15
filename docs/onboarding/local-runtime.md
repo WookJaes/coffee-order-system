@@ -13,7 +13,7 @@ Create a local environment file from the example, then replace placeholder value
 cp .env.example .env
 ```
 
-`MYSQL_USER`는 `root`가 아닌 애플리케이션 계정으로 사용한다. 로컬 기본값은 `coffee`이며, `MYSQL_ROOT_PASSWORD`는 MySQL 관리 계정 전용이다.
+`MYSQL_USER`는 `root`가 아닌 애플리케이션 계정으로 사용한다. `.env.example`의 값은 예시이므로, `.env`에 로컬 환경에서 사용할 값을 입력한다. `MYSQL_ROOT_PASSWORD`는 MySQL 관리 계정 전용이다.
 
 ```bash
 docker compose up -d
