@@ -45,7 +45,7 @@ public class RedisRankingAggregationService {
 			event.menuId().toString()
 		);
 		if (Long.valueOf(-1L).equals(result)) {
-			throw new IllegalStateException("랭킹 Redis 재구성 중입니다.");
+			throw new RankingRebuildInProgressException();
 		}
 		return Long.valueOf(1L).equals(result);
 	}

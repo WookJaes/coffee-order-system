@@ -129,7 +129,7 @@ coffee:ranking:{yyyy-MM-dd} 7개 키
 
 Redis ZSET을 사용하는 이유는 인기 메뉴 조회가 자주 호출될 수 있고, 매번 `orders` 테이블을 집계하면 데이터가 많아질수록 조회 비용이 커지기 때문이다. Redis는 메뉴별 주문 수 증가와 상위 랭킹 조회에 적합하다.
 
-`order-paid` Consumer는 `product-ranking-group`으로 메시지를 소비한다. 동시성, 키·마커 TTL, 재시도 횟수와 DLT 토픽은 `RANKING_CONSUMER_*`, `RANKING_REDIS_KEY_TTL` 환경 변수로 설정한다. `.env.example`은 3개 파티션을 병렬 처리하도록 동시성 3을 예시로 제공한다. `eventId` 중복 마커와 `coffee:ranking:{yyyy-MM-dd}` ZSET의 `menuId` 점수 증가는 `src/main/resources/scripts/ranking-process-once.lua`의 Redis Lua로 원자 처리하므로 Kafka 재전달도 점수를 중복 증가시키지 않는다. 스크립트는 애플리케이션 시작 시 classpath resource에서 한 번 로드한다. 이벤트 한 건은 주문 횟수 1건으로 집계하며, 인기 메뉴 조회 API는 후속 범위다.
+`order-paid` Consumer는 `product-ranking-group`으로 메시지를 소비한다. 동시성, 키·마커 TTL, 재시도 횟수와 DLT 토픽은 `RANKING_CONSUMER_*`, `RANKING_REDIS_KEY_TTL` 환경 변수로 설정한다. Redis 재구성 잠금은 `RANKING_REDIS_REBUILD_LOCK_TTL`, 주기적 lease 연장은 이보다 짧아야 하는 `RANKING_REDIS_REBUILD_LOCK_RENEW_INTERVAL`로 분리한다. `.env.example`은 3개 파티션을 병렬 처리하도록 동시성 3, 잠금 TTL `PT1M`, 연장 주기 `PT20S`를 예시로 제공한다. `eventId` 중복 마커와 `coffee:ranking:{yyyy-MM-dd}` ZSET의 `menuId` 점수 증가는 `src/main/resources/scripts/ranking-process-once.lua`의 Redis Lua로 원자 처리하므로 Kafka 재전달도 점수를 중복 증가시키지 않는다. 스크립트는 애플리케이션 시작 시 classpath resource에서 한 번 로드한다. 이벤트 한 건은 주문 횟수 1건으로 집계하며, 인기 메뉴 조회 API는 후속 범위다.
 
 다만 Redis 랭킹은 실시간 조회 최적화 용도이다. 정확한 주문 원장은 `orders` 테이블이며, Redis 장애 또는 데이터 유실 시에는 `orders` 기준으로 랭킹을 재구성할 수 있어야 한다.
 

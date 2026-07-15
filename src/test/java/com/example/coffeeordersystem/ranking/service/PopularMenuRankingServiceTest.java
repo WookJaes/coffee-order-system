@@ -1,6 +1,7 @@
 package com.example.coffeeordersystem.ranking.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -18,8 +19,12 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
@@ -31,6 +36,9 @@ class PopularMenuRankingServiceTest {
 	private final org.springframework.data.redis.core.ValueOperations<String, String> valueOperations = org.mockito.Mockito.mock(org.springframework.data.redis.core.ValueOperations.class);
 	private final OrderRepository orderRepository = org.mockito.Mockito.mock(OrderRepository.class);
 	private final OrderEventRepository orderEventRepository = org.mockito.Mockito.mock(OrderEventRepository.class);
+	private final ScheduledExecutorService leaseScheduler = org.mockito.Mockito.mock(ScheduledExecutorService.class);
+	@SuppressWarnings("unchecked")
+	private final ScheduledFuture<?> defaultLeaseFuture = org.mockito.Mockito.mock(ScheduledFuture.class);
 	private final Clock clock = Clock.fixed(Instant.parse("2026-07-15T01:00:00Z"), ZoneId.of("Asia/Seoul"));
 	private final PopularMenuRankingService service = new PopularMenuRankingService(
 		redisTemplate,
@@ -38,9 +46,22 @@ class PopularMenuRankingServiceTest {
 		orderEventRepository,
 		Duration.ofDays(8),
 		Duration.ofMinutes(1),
+		Duration.ofSeconds(20),
 		new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
+		new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
+		new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
+		new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
+		new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
+		leaseScheduler,
 		clock
 	);
+
+	@BeforeEach
+	void setUpLeaseScheduler() {
+		org.mockito.Mockito.doReturn(defaultLeaseFuture).when(leaseScheduler)
+			.scheduleAtFixedRate(org.mockito.ArgumentMatchers.any(Runnable.class), org.mockito.ArgumentMatchers.anyLong(),
+				org.mockito.ArgumentMatchers.anyLong(), any(TimeUnit.class));
+	}
 
 	@Test
 	void 요청일을_포함한_7일_ZSET_점수를_합산해_Top3를_반환한다() {
@@ -101,10 +122,6 @@ class PopularMenuRankingServiceTest {
 			new PopularMenuRanking(3L, 4L),
 			new PopularMenuRanking(7L, 2L)
 		);
-		verify(zSetOperations).add("coffee:ranking:2026-07-14", "7", 2D);
-		verify(zSetOperations).add("coffee:ranking:2026-07-15", "3", 4D);
-		verify(redisTemplate).expire("coffee:ranking:2026-07-14", Duration.ofDays(8));
-		verify(redisTemplate).expire("coffee:ranking:2026-07-15", Duration.ofDays(8));
 	}
 
 	@Test
@@ -129,8 +146,6 @@ class PopularMenuRankingServiceTest {
 
 		// then
 		assertThat(rankings).containsExactly(new PopularMenuRanking(3L, 4L));
-		verify(redisTemplate).delete(org.mockito.ArgumentMatchers.<String>anyList());
-		verify(zSetOperations).add("coffee:ranking:2026-07-15", "3", 4D);
 	}
 
 	@Test
@@ -150,6 +165,97 @@ class PopularMenuRankingServiceTest {
 		// then
 		assertThat(rankings).containsExactly(new PopularMenuRanking(3L, 4L));
 		verify(zSetOperations, org.mockito.Mockito.never()).add(any(), any(), any(Double.class));
+	}
+
+	@Test
+	void lease_연장에_실패하면_재구성을_중단하고_이후_Redis_점수표를_수정하지_않는다() {
+		// given
+		ScheduledExecutorService scheduler = org.mockito.Mockito.mock(ScheduledExecutorService.class);
+		@SuppressWarnings("unchecked")
+		ScheduledFuture<?> future = org.mockito.Mockito.mock(ScheduledFuture.class);
+		ArgumentCaptor<Runnable> renewalCaptor = ArgumentCaptor.forClass(Runnable.class);
+		org.mockito.Mockito.doReturn(future).when(scheduler)
+			.scheduleAtFixedRate(renewalCaptor.capture(), eq(20L), eq(20L), eq(TimeUnit.SECONDS));
+		when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.setIfAbsent(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), any(Duration.class)))
+			.thenReturn(true);
+		when(zSetOperations.rangeWithScores(any(), eq(0L), eq(-1L))).thenReturn(Set.of());
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.<org.springframework.data.redis.core.script.RedisScript<Long>>any(),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(0L);
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenAnswer(invocation -> {
+			renewalCaptor.getValue().run();
+			return List.of(new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 3L, 4L));
+		});
+		PopularMenuRankingService leaseService = new PopularMenuRankingService(
+			redisTemplate, orderRepository, orderEventRepository, Duration.ofDays(8), Duration.ofMinutes(1), Duration.ofSeconds(20),
+			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
+			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
+			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
+			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
+			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class), scheduler, clock
+		);
+
+		// when
+		org.assertj.core.api.ThrowableAssert.ThrowingCallable recover = leaseService::getPopularMenuRankings;
+
+		// then
+		assertThatThrownBy(recover).isInstanceOf(IllegalStateException.class)
+			.hasMessage("랭킹 Redis 재구성 잠금 소유권을 잃었습니다.");
+		verify(zSetOperations, org.mockito.Mockito.never()).add(any(), any(), any(Double.class));
+		verify(future).cancel(false);
+	}
+
+	@Test
+	void 소유권을_잃으면_이번_재구성이_만든_이벤트_마커만_조건부로_정리한다() {
+		// given
+		ScheduledExecutorService scheduler = org.mockito.Mockito.mock(ScheduledExecutorService.class);
+		@SuppressWarnings("unchecked")
+		ScheduledFuture<?> future = org.mockito.Mockito.mock(ScheduledFuture.class);
+		ArgumentCaptor<Runnable> renewalCaptor = ArgumentCaptor.forClass(Runnable.class);
+		org.mockito.Mockito.doReturn(future).when(scheduler)
+			.scheduleAtFixedRate(renewalCaptor.capture(), eq(20L), eq(20L), eq(TimeUnit.SECONDS));
+		org.springframework.data.redis.core.script.DefaultRedisScript<Long> releaseScript =
+			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class);
+		org.springframework.data.redis.core.script.DefaultRedisScript<Long> renewScript =
+			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class);
+		org.springframework.data.redis.core.script.DefaultRedisScript<Long> cleanupMarkerScript =
+			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class);
+		org.springframework.data.redis.core.script.DefaultRedisScript<Long> cleanupRebuildScript =
+			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class);
+		org.springframework.data.redis.core.script.DefaultRedisScript<Long> rebuildWriteScript =
+			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class);
+		when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.setIfAbsent(eq("coffee:ranking:rebuilding"), org.mockito.ArgumentMatchers.anyString(), any(Duration.class)))
+			.thenReturn(true);
+		when(valueOperations.setIfAbsent(eq("coffee:ranking:processed:42"), org.mockito.ArgumentMatchers.anyString(), any(Duration.class)))
+			.thenAnswer(invocation -> {
+				renewalCaptor.getValue().run();
+				return true;
+			});
+		when(zSetOperations.rangeWithScores(any(), eq(0L), eq(-1L))).thenReturn(Set.of());
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of());
+		when(orderEventRepository.findPaidEventsForRankingRebuild(any(), any()))
+			.thenReturn(List.of(new com.example.coffeeordersystem.ranking.dto.RebuildOrderEvent(42L), new com.example.coffeeordersystem.ranking.dto.RebuildOrderEvent(43L)));
+		when(redisTemplate.execute(org.mockito.ArgumentMatchers.<org.springframework.data.redis.core.script.RedisScript<Long>>any(),
+			org.mockito.ArgumentMatchers.<String>anyList(), org.mockito.ArgumentMatchers.any(Object[].class))).thenReturn(-1L);
+		PopularMenuRankingService leaseService = new PopularMenuRankingService(
+			redisTemplate, orderRepository, orderEventRepository, Duration.ofDays(8), Duration.ofMinutes(1), Duration.ofSeconds(20),
+			releaseScript, renewScript, cleanupMarkerScript, cleanupRebuildScript, rebuildWriteScript, scheduler, clock
+		);
+
+		// when
+		org.assertj.core.api.ThrowableAssert.ThrowingCallable recover = leaseService::getPopularMenuRankings;
+
+		// then
+		assertThatThrownBy(recover).isInstanceOf(IllegalStateException.class)
+			.hasMessage("랭킹 Redis 재구성 잠금 소유권을 잃었습니다.");
+		verify(redisTemplate).execute(org.mockito.ArgumentMatchers.same(cleanupRebuildScript),
+			org.mockito.ArgumentMatchers.<String>anyList(), org.mockito.ArgumentMatchers.any(Object[].class));
 	}
 
 	private Set<ZSetOperations.TypedTuple<String>> tuples(Object... membersAndScores) {
