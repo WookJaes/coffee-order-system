@@ -9,3 +9,12 @@ spring:
       ddl-auto: create-drop
   flyway:
     enabled: false
+
+outbox:
+  publisher:
+    topic: order-paid
+    fixed-delay: PT1H
+    batch-size: 100
+    max-retry-count: 3
+    retry-backoff: PT0S
+    processing-timeout: PT0S
