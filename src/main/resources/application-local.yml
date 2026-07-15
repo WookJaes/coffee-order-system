@@ -27,6 +27,13 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.example.coffeeordersystem.outbox.dto
+        spring.json.value.default.type: com.example.coffeeordersystem.outbox.dto.OrderPaidEvent
 
 management:
   endpoints:
@@ -45,3 +52,15 @@ outbox:
     max-retry-count: ${OUTBOX_PUBLISHER_MAX_RETRY_COUNT}
     retry-backoff: ${OUTBOX_PUBLISHER_RETRY_BACKOFF}
     processing-timeout: ${OUTBOX_PUBLISHER_PROCESSING_TIMEOUT}
+
+ranking:
+  consumer:
+    enabled: ${RANKING_CONSUMER_ENABLED}
+    topic: ${RANKING_CONSUMER_TOPIC}
+    group-id: ${RANKING_CONSUMER_GROUP_ID}
+    dlt-topic: ${RANKING_CONSUMER_DLT_TOPIC}
+    max-retry-attempts: ${RANKING_CONSUMER_MAX_RETRY_ATTEMPTS}
+    retry-backoff: ${RANKING_CONSUMER_RETRY_BACKOFF}
+    concurrency: ${RANKING_CONSUMER_CONCURRENCY}
+  redis:
+    key-ttl: ${RANKING_REDIS_KEY_TTL}
