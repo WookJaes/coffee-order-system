@@ -26,6 +26,7 @@ import com.example.coffeeordersystem.point.repository.PointHistoryRepository;
 import com.example.coffeeordersystem.user.entity.User;
 import com.example.coffeeordersystem.user.repository.UserRepository;
 
+import java.time.LocalDateTime;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -37,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -73,6 +75,9 @@ class OutboxPublisherServiceTest {
 
 	@Autowired
 	private OrderRepository orderRepository;
+
+	@Autowired
+	private JdbcTemplate jdbcTemplate;
 
 	@MockitoBean
 	private KafkaTemplate<String, OrderPaidEvent> kafkaTemplate;
@@ -172,7 +177,20 @@ class OutboxPublisherServiceTest {
 
 		outboxPublisherService.publishPendingEvents();
 
+		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus())
+			.isEqualTo(OrderEventStatus.PROCESSING);
+		verify(kafkaTemplate, times(0)).send(any(), any(), any(OrderPaidEvent.class));
+
+		jdbcTemplate.update(
+			"update order_events set processing_started_at = ? where id = ?",
+			LocalDateTime.now().minus(properties.processingTimeout()).minusSeconds(1),
+			event.eventId()
+		);
+
+		outboxPublisherService.publishPendingEvents();
+
 		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
+		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 	}
 
 	private EventFixture createOrderEvent(String key) {

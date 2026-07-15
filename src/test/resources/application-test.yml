@@ -17,4 +17,4 @@ outbox:
     batch-size: 100
     max-retry-count: 3
     retry-backoff: PT0S
-    processing-timeout: PT0S
+    processing-timeout: PT1M
