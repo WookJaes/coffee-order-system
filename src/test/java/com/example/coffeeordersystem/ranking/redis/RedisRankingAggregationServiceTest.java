@@ -1,6 +1,7 @@
 package com.example.coffeeordersystem.ranking.redis;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -49,7 +50,9 @@ class RedisRankingAggregationServiceTest {
 		verify(redisTemplate).execute(org.mockito.ArgumentMatchers.same(processOnceScript), keyCaptor.capture(), argumentCaptor.capture());
 		assertThat(keyCaptor.getValue()).containsExactly(
 			"coffee:ranking:processed:42",
-			"coffee:ranking:2026-07-15"
+			"coffee:ranking:2026-07-15",
+			"coffee:ranking:rebuilding",
+			"coffee:ranking:status:2026-07-15"
 		);
 		assertThat(argumentCaptor.getValue()).containsExactly("691200", "1", "7");
 	}
@@ -69,6 +72,24 @@ class RedisRankingAggregationServiceTest {
 
 		// then
 		assertThat(aggregated).isFalse();
+	}
+
+	@Test
+	void Redis_재구성_잠금_중에는_이벤트_집계를_재시도하도록_예외를_발생시킨다() {
+		// given
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.<RedisScript<Long>>any(),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(-1L);
+
+		// when
+		org.assertj.core.api.ThrowableAssert.ThrowingCallable aggregate = () ->
+			service.aggregate(new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500));
+
+		// then
+		assertThatThrownBy(aggregate).isInstanceOf(IllegalStateException.class)
+			.hasMessage("랭킹 Redis 재구성 중입니다.");
 	}
 
 	@SuppressWarnings("unchecked")

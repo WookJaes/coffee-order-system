@@ -24,5 +24,8 @@
 - classpath Lua 리소스 로드와 집계 서비스의 스크립트 주입
 - 임베디드 Kafka에서 Redis 실패 시 최초 처리 1회와 재시도 2회(총 3회) 뒤 DLT 이동, 성공 전 offset 미커밋(RECORD ack), 파티션 수와 Consumer 동시성 정합성
 - 최근 7일 Top 3, 동점 정렬, DB 재구성 쿼리
+- 인기 메뉴 API의 `rank/menuId/menuName/orderCount` 공통 성공 응답, `ACTIVE` 메뉴 필터와 순위 보충, Redis 비어 있음 뒤 `PAID` 주문 기반 일자별 ZSET 복구
+- Redis 재구성 잠금 중 Consumer가 ZSET을 갱신하지 않고 재시도하며, 재구성 뒤 복원된 이벤트 마커로 중복 집계를 막는지 확인
+- `DATA`/`EMPTY` 일자 완료 상태가 누락되거나 `DATA` ZSET이 유실되면 DB 원장으로 7일 전체를 다시 복구하고, 토큰이 다른 재구성 잠금은 삭제하지 않는지 확인
 
 코드, DB migration, 인프라 설정을 변경한 작업은 변경 범위의 focused test와 전체 `./gradlew test`를 실행한다. 실제 실행 결과는 `verification-log.md`에 기록한다.

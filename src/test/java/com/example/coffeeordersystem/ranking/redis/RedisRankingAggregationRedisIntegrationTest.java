@@ -1,6 +1,7 @@
 package com.example.coffeeordersystem.ranking.redis;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.coffeeordersystem.outbox.dto.OrderPaidEvent;
 
@@ -76,5 +77,22 @@ class RedisRankingAggregationRedisIntegrationTest {
 		assertThat(redisTemplate.opsForZSet().score(rankingKey, "7")).isEqualTo(1.0);
 		assertThat(redisTemplate.getExpire(rankingKey)).isPositive().isLessThanOrEqualTo(KEY_TTL.getSeconds());
 		assertThat(redisTemplate.getExpire(processedKey)).isPositive().isLessThanOrEqualTo(KEY_TTL.getSeconds());
+	}
+
+	@Test
+	void 실제_Redis_재구성_잠금이_있으면_집계를_중단한다() {
+		// given
+		redisTemplate.opsForValue().set(RedisRankingKey.rebuilding(), "1", Duration.ofMinutes(1));
+		OrderPaidEvent event = new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500);
+
+		// when
+		org.assertj.core.api.ThrowableAssert.ThrowingCallable aggregate = () -> service.aggregate(event);
+
+		// then
+		assertThatThrownBy(aggregate).isInstanceOf(IllegalStateException.class)
+			.hasMessage("랭킹 Redis 재구성 중입니다.");
+		assertThat(redisTemplate.opsForZSet().score(
+			RedisRankingKey.dailyRanking(java.time.LocalDate.of(2026, 7, 15)), "7"
+		)).isNull();
 	}
 }

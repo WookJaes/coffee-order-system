@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.coffeeordersystem.menu.dto.MenuListResponse;
+import com.example.coffeeordersystem.menu.dto.PopularMenuResponse;
 import com.example.coffeeordersystem.menu.service.MenuService;
 
 import java.util.List;
@@ -47,5 +48,25 @@ class MenuControllerTest {
 			.andExpect(jsonPath("$.data[0].menuId").value(1))
 			.andExpect(jsonPath("$.data[0].name").value("아메리카노"))
 			.andExpect(jsonPath("$.data[0].price").value(4500));
+	}
+
+	@Test
+	void 인기_메뉴를_공통_성공_응답으로_반환한다() throws Exception {
+		// given
+		org.mockito.BDDMockito.given(menuService.getPopularMenus())
+			.willReturn(List.of(new PopularMenuResponse(1, 3L, "카페라떼", 12L)));
+
+		// when
+		ResultActions result = mockMvc.perform(get("/api/menus/popular"));
+
+		// then
+		result
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.status").value(HttpStatus.OK.value()))
+			.andExpect(jsonPath("$.message").value("요청이 성공했습니다."))
+			.andExpect(jsonPath("$.data[0].rank").value(1))
+			.andExpect(jsonPath("$.data[0].menuId").value(3))
+			.andExpect(jsonPath("$.data[0].menuName").value("카페라떼"))
+			.andExpect(jsonPath("$.data[0].orderCount").value(12));
 	}
 }

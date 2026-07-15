@@ -13,7 +13,7 @@ class RankingRedisConfigTest {
 	@Test
 	void Spring이_구성한_RedisTemplate으로_집계_서비스와_Lua_스크립트를_생성한다() {
 		// given
-		RankingRedisConfig config = new RankingRedisConfig(new RankingRedisProperties(Duration.ofDays(8)));
+		RankingRedisConfig config = new RankingRedisConfig(new RankingRedisProperties(Duration.ofDays(8), Duration.ofMinutes(1)));
 		StringRedisTemplate redisTemplate = org.mockito.Mockito.mock(StringRedisTemplate.class);
 
 		// when

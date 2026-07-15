@@ -10,4 +10,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface MenuRepository extends JpaRepository<Menu, Long> {
 
 	List<Menu> findAllByStatus(MenuStatus status);
+
+	List<Menu> findAllByIdInAndStatus(List<Long> ids, MenuStatus status);
 }

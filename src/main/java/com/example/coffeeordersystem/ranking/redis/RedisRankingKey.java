@@ -18,4 +18,12 @@ public final class RedisRankingKey {
 	public static String processedEvent(Long eventId) {
 		return RANKING_PREFIX + "processed:" + eventId;
 	}
+
+	public static String dailyStatus(LocalDate date) {
+		return RANKING_PREFIX + "status:" + DATE_FORMATTER.format(date);
+	}
+
+	public static String rebuilding() {
+		return RANKING_PREFIX + "rebuilding";
+	}
 }

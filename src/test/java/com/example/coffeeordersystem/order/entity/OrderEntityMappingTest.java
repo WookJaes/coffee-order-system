@@ -3,6 +3,7 @@ package com.example.coffeeordersystem.order.entity;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.coffeeordersystem.global.entity.BaseEntity;
+import com.example.coffeeordersystem.point.entity.PointHistoryType;
 
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -38,10 +39,10 @@ class OrderEntityMappingTest {
 		String typeName = "USE";
 
 		// when
-		var pointHistoryType = com.example.coffeeordersystem.point.entity.PointHistoryType.valueOf(typeName);
+		var pointHistoryType = PointHistoryType.valueOf(typeName);
 
 		// then
 		assertThat(pointHistoryType)
-			.isEqualTo(com.example.coffeeordersystem.point.entity.PointHistoryType.USE);
+			.isEqualTo(PointHistoryType.USE);
 	}
 }

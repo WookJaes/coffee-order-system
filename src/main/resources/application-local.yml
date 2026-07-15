@@ -64,3 +64,4 @@ ranking:
     concurrency: ${RANKING_CONSUMER_CONCURRENCY}
   redis:
     key-ttl: ${RANKING_REDIS_KEY_TTL}
+    rebuild-lock-ttl: ${RANKING_REDIS_REBUILD_LOCK_TTL}
