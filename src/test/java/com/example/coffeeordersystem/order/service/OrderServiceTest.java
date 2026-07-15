@@ -1,7 +1,7 @@
 package com.example.coffeeordersystem.order.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.catchThrowableOfType;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.example.coffeeordersystem.global.exception.BusinessException;
 import com.example.coffeeordersystem.global.exception.ErrorCode;
@@ -341,7 +341,9 @@ class OrderServiceTest {
 	}
 
 	private BusinessException createAndGetError(OrderCreateRequest request, String key) {
-		return catchThrowableOfType(() -> orderService.create(request, key), BusinessException.class);
+		Throwable throwable = catchThrowable(() -> orderService.create(request, key));
+		assertThat(throwable).isInstanceOf(BusinessException.class);
+		return (BusinessException) throwable;
 	}
 }
 		// then
