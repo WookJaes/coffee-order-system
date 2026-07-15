@@ -487,17 +487,19 @@ GET /api/menus/popular
 ```json
 {
   "status": 200,
-  "message": "인기 메뉴 목록 조회 성공",
+  "message": "요청이 성공했습니다.",
   "data": [
     {
       "menuId": 1,
-      "name": "아메리카노",
-      "price": 4500,
+      "rank": 1,
+      "menuName": "아메리카노",
       "orderCount": 25
     }
   ]
 }
 ```
+
+요청일을 포함한 최근 7일의 일자별 Redis ZSET 점수를 메뉴별로 합산한다. 정렬은 주문 횟수 내림차순, 동점이면 숫자 메뉴 ID 오름차순이다. 현재 `ACTIVE` 메뉴만 최대 3건 반환한다. 7일치 Redis 랭킹이 모두 비어 있으면 `orders.ordered_at`의 같은 기간 `PAID` 주문을 일자·메뉴별로 집계해 응답하고, 결과가 있으면 같은 일자별 ZSET과 TTL을 복구한다. DB 집계도 비어 있으면 주문이 없는 정상 상태로 빈 목록을 반환한다.
 
 ## 5. 공통 응답 및 예외 처리
 
