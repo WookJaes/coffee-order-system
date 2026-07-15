@@ -19,4 +19,10 @@ public record OutboxPublisherProperties(
 	@NotNull Duration retryBackoff,
 	@NotNull Duration processingTimeout
 ) {
+
+	public OutboxPublisherProperties {
+		if (processingTimeout == null || processingTimeout.isZero() || processingTimeout.isNegative()) {
+			throw new IllegalArgumentException("Outbox 처리 제한 시간은 0보다 커야 합니다.");
+		}
+	}
 }
