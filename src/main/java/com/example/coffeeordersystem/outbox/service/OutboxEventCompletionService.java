@@ -21,25 +21,35 @@ public class OutboxEventCompletionService {
 	private final OutboxPublisherProperties properties;
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
-	public void markSent(Long eventId, String token) {
-		findClaimedEvent(eventId, token).markSent();
+	public boolean markSent(Long eventId, String token) {
+		OrderEvent event = findClaimedEvent(eventId, token);
+		if (event == null) {
+			return false;
+		}
+		event.markSent();
+		return true;
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
-	public void markFailed(Long eventId, String token, Throwable throwable) {
-		findClaimedEvent(eventId, token).markPublishFailed(
+	public boolean markFailed(Long eventId, String token, Throwable throwable) {
+		OrderEvent event = findClaimedEvent(eventId, token);
+		if (event == null) {
+			return false;
+		}
+		event.markPublishFailed(
 			properties.maxRetryCount(),
 			properties.retryBackoff(),
 			LocalDateTime.now(),
 			throwable.getMessage() == null ? throwable.getClass().getSimpleName() : throwable.getMessage()
 		);
+		return true;
 	}
 
 	private OrderEvent findClaimedEvent(Long eventId, String token) {
 		OrderEvent event = orderEventRepository.findByIdForUpdate(eventId).orElseThrow();
 
 		if (event.getStatus() != OrderEventStatus.PROCESSING || !token.equals(event.getProcessingToken())) {
-			throw new IllegalStateException("Outbox 이벤트 선점 정보가 유효하지 않습니다.");
+			return null;
 		}
 
 		return event;

@@ -52,6 +52,20 @@ public interface OrderEventRepository extends JpaRepository<OrderEvent, Long> {
 		""")
 	int recoverStaleProcessing(@Param("now") LocalDateTime now, @Param("recoveryCutoff") LocalDateTime recoveryCutoff);
 
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+		update OrderEvent e
+		set e.processingStartedAt = :now
+		where e.id = :eventId
+		  and e.status = 'PROCESSING'
+		  and e.processingToken = :token
+		""")
+	int renewProcessingLease(
+		@Param("eventId") Long eventId,
+		@Param("token") String token,
+		@Param("now") LocalDateTime now
+	);
+
 	List<OrderEvent> findByProcessingTokenOrderById(String processingToken);
 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)

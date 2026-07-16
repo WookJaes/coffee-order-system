@@ -19,10 +19,11 @@ public record OutboxPublisherProperties(
 	@NotNull Duration retryBackoff,
 	@NotNull Duration processingTimeout
 ) {
+	private static final Duration MIN_PROCESSING_TIMEOUT = Duration.ofSeconds(1);
 
 	public OutboxPublisherProperties {
-		if (processingTimeout == null || processingTimeout.isZero() || processingTimeout.isNegative()) {
-			throw new IllegalArgumentException("Outbox 처리 제한 시간은 0보다 커야 합니다.");
+		if (processingTimeout == null || processingTimeout.compareTo(MIN_PROCESSING_TIMEOUT) < 0) {
+			throw new IllegalArgumentException("Outbox 처리 제한 시간은 1초 이상이어야 합니다.");
 		}
 	}
 }

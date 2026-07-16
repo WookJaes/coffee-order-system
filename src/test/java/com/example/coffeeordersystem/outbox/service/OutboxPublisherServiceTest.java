@@ -4,8 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 
 import org.mockito.ArgumentCaptor;
 
@@ -32,17 +35,21 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-@SpringBootTest
+@SpringBootTest(properties = "outbox.publisher.processing-timeout=PT1S")
 @ActiveProfiles("test")
 class OutboxPublisherServiceTest {
 
@@ -51,6 +58,9 @@ class OutboxPublisherServiceTest {
 
 	@Autowired
 	private OutboxEventClaimService outboxEventClaimService;
+
+	@Autowired
+	private OutboxEventCompletionService outboxEventCompletionService;
 
 	@Autowired
 	private OutboxPublisherProperties properties;
@@ -81,6 +91,18 @@ class OutboxPublisherServiceTest {
 
 	@MockitoBean
 	private KafkaTemplate<String, OrderPaidEvent> kafkaTemplate;
+
+	@MockitoBean(name = "outboxKafkaSendExecutor")
+	private AsyncTaskExecutor outboxKafkaSendExecutor;
+
+	@BeforeEach
+	void submitKafkaSendTask() {
+		doAnswer(invocation -> {
+			FutureTask<Void> task = new FutureTask<>(invocation.getArgument(0, Runnable.class), null);
+			CompletableFuture.runAsync(task);
+			return task;
+		}).when(outboxKafkaSendExecutor).submit(any(Runnable.class));
+	}
 
 	@AfterEach
 	void tearDown() {
@@ -168,6 +190,92 @@ class OutboxPublisherServiceTest {
 
 		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
 		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+	}
+
+	@Test
+	void Kafka_발행_호출이_처리_제한_시간을_넘어도_유효한_선점은_다른_Publisher가_회수하지_않는다() throws Exception {
+		// given
+		EventFixture event = createOrderEvent("long-running-send");
+		CountDownLatch sendInvocationStarted = new CountDownLatch(1);
+		CountDownLatch releaseSendInvocation = new CountDownLatch(1);
+		doAnswer(invocation -> {
+			sendInvocationStarted.countDown();
+			try {
+				releaseSendInvocation.await();
+			} catch (InterruptedException exception) {
+				Thread.currentThread().interrupt();
+			}
+			return CompletableFuture.completedFuture(null);
+		}).when(kafkaTemplate)
+			.send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+
+		// when
+		ExecutorService executor = Executors.newFixedThreadPool(2);
+		Future<?> first = executor.submit(outboxPublisherService::publishPendingEvents);
+		sendInvocationStarted.await();
+		Thread.sleep(properties.processingTimeout().plusMillis(500).toMillis());
+		Future<?> second = executor.submit(outboxPublisherService::publishPendingEvents);
+		Thread.sleep(200);
+		releaseSendInvocation.countDown();
+		first.get();
+		second.get();
+		executor.shutdown();
+
+		// then
+		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
+		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+	}
+
+	@Test
+	void lease를_잃은_Publisher의_완료_처리는_상태를_변경하지_않는다() {
+		// given
+		EventFixture event = createOrderEvent("lost-lease");
+		outboxEventClaimService.claimPendingEvents();
+
+		// when
+		boolean sent = outboxEventCompletionService.markSent(event.eventId(), "lost-token");
+
+		// then
+		assertThat(sent).isFalse();
+		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus())
+			.isEqualTo(OrderEventStatus.PROCESSING);
+	}
+
+	@Test
+	void Kafka_send_작업이_거절되면_lease를_연장하지_않고_기존_실패_재시도_경로로_전환한다() {
+		// given
+		EventFixture event = createOrderEvent("executor-rejected");
+		doThrow(new TaskRejectedException("outbox send executor saturated"))
+			.when(outboxKafkaSendExecutor).submit(any(Runnable.class));
+
+		// when
+		outboxPublisherService.publishPendingEvents();
+
+		// then
+		OrderEvent retried = orderEventRepository.findById(event.eventId()).orElseThrow();
+		assertThat(retried.getStatus()).isEqualTo(OrderEventStatus.PENDING);
+		assertThat(retried.getRetryCount()).isEqualTo(1);
+		assertThat(retried.getLastError()).contains("outbox send executor saturated");
+		verify(kafkaTemplate, never()).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+	}
+
+	@Test
+	void Kafka_send_작업이_시작되지_않으면_취소하고_기존_실패_재시도_경로로_전환한다() {
+		// given
+		EventFixture event = createOrderEvent("executor-not-started");
+		FutureTask<Void> notStartedTask = new FutureTask<>(() -> null);
+		doReturn(notStartedTask).when(outboxKafkaSendExecutor).submit(any(Runnable.class));
+
+		// when
+		outboxPublisherService.publishPendingEvents();
+
+		// then
+		OrderEvent retried = orderEventRepository.findById(event.eventId()).orElseThrow();
+		assertThat(notStartedTask.isCancelled()).isTrue();
+		assertThat(retried.getStatus()).isEqualTo(OrderEventStatus.PENDING);
+		assertThat(retried.getRetryCount()).isEqualTo(1);
+		assertThat(retried.getLastError()).contains("Outbox Kafka send 작업이 시작되지 않았습니다.");
+		verify(kafkaTemplate, never()).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 	}
 
 	@Test

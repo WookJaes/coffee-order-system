@@ -20,7 +20,8 @@
 - 같은 사용자의 충전·주문 교차 동시성에서 `CHARGE - USE`와 최종 잔액 일치, 음수 잔액 방지, 성공 `USE` 이력·주문·Outbox 수 일치
 - 교차 실행 중 잔액 부족 주문은 잔액의 충전분 외 주문·`USE` 이력·Outbox를 남기지 않음
 - Outbox `PENDING` 발행 성공 후 `SENT`, 발행 실패 뒤 backoff·재시도 횟수·`FAILED` 전이
-- 두 Publisher의 같은 이벤트 동시 선점 방지와 오래된 `PROCESSING` 회복
+- Kafka `send()` 호출 자체 또는 발행 완료가 `processingTimeout`을 넘어도 유효한 lease를 갱신하는 Publisher의 이벤트를 다른 Publisher가 회수·재선점·재발행하지 않는지, 두 Publisher의 같은 이벤트 동시 선점 방지와 lease 갱신이 멈춘 오래된 `PROCESSING` 회복
+- Kafka send executor 거절 또는 작업 미시작 시 Kafka 호출 없이 기존 backoff·재시도 경로로 전환하는지 확인
 - Kafka 중복 메시지, Redis 갱신 실패 후 DLT 이동
 - Redis Lua 집계의 날짜별 키·TTL·메뉴 주문 수 증가와 같은 `eventId`의 중복 무증가, 자정 경계·지연 소비에도 이벤트 주문 시각의 Asia/Seoul 날짜 키 선택. `orderedAt`이 없는 이전 Kafka 메시지는 주문 원장으로 시각을 보완한다.
 - Testcontainers Redis에서 실제 Lua 실행으로 중복 이벤트의 ZSET 점수 무증가와 마커·랭킹 키 TTL 검증. Docker daemon이 없으면 이 테스트는 skip하며, Docker 사용 환경에서는 JUnit 결과의 `skipped=0`을 확인한다.
