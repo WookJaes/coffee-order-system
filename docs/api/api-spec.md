@@ -119,6 +119,7 @@ Idempotency-Key: 4de91f71-4c2d-4eb9-bc8e-2b0f4603a1fb
 #### 조회 기준
 
 - 기간은 요청 시각을 기준으로 최근 7일이며, `orders.ordered_at`을 사용한다.
+- Kafka 지연·재시도·재소비가 있어도 일자별 Redis 랭킹 키는 주문의 `ordered_at`과 같은 Asia/Seoul 날짜를 사용한다.
 - `PAID` 상태 주문만 집계한다.
 - 주문 횟수 내림차순으로 정렬하고, 동점이면 메뉴 ID 오름차순으로 정렬한다.
 - 기본 조회 대상은 Redis 일자별 ZSET을 합산한 랭킹이다.

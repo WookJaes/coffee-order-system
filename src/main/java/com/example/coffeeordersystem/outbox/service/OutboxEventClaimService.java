@@ -51,7 +51,8 @@ public class OutboxEventClaimService {
 			event.getOrder().getId(),
 			event.getUser().getId(),
 			event.getMenu().getId(),
-			event.getPaymentAmount()
+			event.getPaymentAmount(),
+			event.getOrder().getOrderedAt()
 		);
 	}
 }

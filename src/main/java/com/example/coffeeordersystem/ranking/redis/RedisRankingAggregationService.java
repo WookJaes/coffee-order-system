@@ -5,6 +5,7 @@ import com.example.coffeeordersystem.outbox.dto.OrderPaidEvent;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -13,6 +14,7 @@ import org.springframework.data.redis.core.script.RedisScript;
 public class RedisRankingAggregationService {
 
 	private static final long ORDER_COUNT_INCREMENT = 1L;
+	private static final ZoneId ORDER_TIME_ZONE = ZoneId.of("Asia/Seoul");
 	private final StringRedisTemplate redisTemplate;
 	private final Duration keyTtl;
 	private final Clock clock;
@@ -31,7 +33,7 @@ public class RedisRankingAggregationService {
 	}
 
 	public boolean aggregate(OrderPaidEvent event) {
-		LocalDate date = LocalDate.now(clock);
+		LocalDate date = event.orderedAt().atZone(ORDER_TIME_ZONE).toLocalDate();
 		Long result = redisTemplate.execute(
 			processOnceScript,
 			List.of(

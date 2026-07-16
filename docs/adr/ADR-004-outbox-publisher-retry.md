@@ -35,7 +35,7 @@ Issue #6은 주문 트랜잭션에서 저장된 `order_events`를 `order-paid` K
 ### 구현 내용
 
 - `OutboxEventClaimService`는 짧은 `REQUIRES_NEW` 트랜잭션에서 오래된 `PROCESSING`을 복구하고 조건부 갱신으로 선점한다.
-- `OutboxPublisherService`는 트랜잭션 밖에서 `KafkaTemplate`의 완료를 기다리고 메시지 키로 `orderId`를 사용한다.
+- `OutboxPublisherService`는 트랜잭션 밖에서 `KafkaTemplate`의 완료를 기다리고 메시지 키로 `orderId`를 사용한다. `OrderPaidEvent`에는 연결된 주문의 실제 `orderedAt`도 담아 Consumer가 지연 소비 시에도 주문일 랭킹 키를 선택할 수 있게 한다.
 - `OutboxEventCompletionService`는 짧은 비관적 잠금 트랜잭션에서 선점 토큰을 재확인한 후 `SENT` 또는 실패 상태를 기록한다.
 - `outbox.publisher.*` 설정으로 토픽, 주기, 배치 크기, 최대 실패 횟수, backoff, 처리 제한 시간을 조정한다.
 

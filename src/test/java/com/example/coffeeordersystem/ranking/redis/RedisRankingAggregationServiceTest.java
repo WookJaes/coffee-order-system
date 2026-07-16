@@ -10,6 +10,7 @@ import com.example.coffeeordersystem.outbox.dto.OrderPaidEvent;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 
@@ -31,7 +32,7 @@ class RedisRankingAggregationServiceTest {
 	);
 
 	@Test
-	void 새_이벤트는_해당_날짜_ZSET의_메뉴_주문수를_한번_증가시킨다() {
+	void 자정_이후_소비해도_주문_시각의_Asia_Seoul_날짜_ZSET에_메뉴_주문수를_한번_증가시킨다() {
 		// given
 		when(redisTemplate.execute(
 			org.mockito.ArgumentMatchers.<RedisScript<Long>>any(),
@@ -41,7 +42,9 @@ class RedisRankingAggregationServiceTest {
 
 
 		// when
-		boolean aggregated = service.aggregate(new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500));
+		boolean aggregated = service.aggregate(new OrderPaidEvent(
+			42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 14, 23, 59, 59)
+		));
 
 		// then
 		assertThat(aggregated).isTrue();
@@ -50,9 +53,9 @@ class RedisRankingAggregationServiceTest {
 		verify(redisTemplate).execute(org.mockito.ArgumentMatchers.same(processOnceScript), keyCaptor.capture(), argumentCaptor.capture());
 		assertThat(keyCaptor.getValue()).containsExactly(
 			"coffee:ranking:processed:42",
-			"coffee:ranking:2026-07-15",
+			"coffee:ranking:2026-07-14",
 			"coffee:ranking:rebuilding",
-			"coffee:ranking:status:2026-07-15"
+			"coffee:ranking:status:2026-07-14"
 		);
 		assertThat(argumentCaptor.getValue()).containsExactly("691200", "1", "7");
 	}
@@ -68,7 +71,9 @@ class RedisRankingAggregationServiceTest {
 
 
 		// when
-		boolean aggregated = service.aggregate(new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500));
+		boolean aggregated = service.aggregate(new OrderPaidEvent(
+			42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0)
+		));
 
 		// then
 		assertThat(aggregated).isFalse();
@@ -85,7 +90,9 @@ class RedisRankingAggregationServiceTest {
 
 		// when
 		org.assertj.core.api.ThrowableAssert.ThrowingCallable aggregate = () ->
-			service.aggregate(new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500));
+			service.aggregate(new OrderPaidEvent(
+				42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0)
+			));
 
 		// then
 		assertThatThrownBy(aggregate).isInstanceOf(IllegalStateException.class)

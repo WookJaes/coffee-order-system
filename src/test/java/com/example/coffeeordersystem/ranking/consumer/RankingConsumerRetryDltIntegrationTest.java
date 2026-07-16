@@ -11,6 +11,7 @@ import com.example.coffeeordersystem.ranking.redis.RankingRebuildInProgressExcep
 import com.example.coffeeordersystem.ranking.redis.RedisRankingAggregationService;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import org.apache.kafka.clients.consumer.Consumer;
@@ -75,7 +76,7 @@ class RankingConsumerRetryDltIntegrationTest {
 	@Test
 	void Redis_실패는_설정된_횟수만큼_재시도한_뒤_DLT로_보낸다() throws Exception {
 		// given
-		OrderPaidEvent event = new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500);
+		OrderPaidEvent event = new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0));
 		doThrow(new IllegalStateException("redis unavailable")).when(aggregationService).aggregate(event);
 		try (Consumer<String, OrderPaidEvent> dltConsumer = dltConsumer()) {
 			embeddedKafkaBroker.consumeFromAnEmbeddedTopic(dltConsumer, "order-paid.DLT");
@@ -96,7 +97,7 @@ class RankingConsumerRetryDltIntegrationTest {
 	@Test
 	void 재구성_잠금_예외는_기본_재시도_횟수를_넘겨도_DLT로_보내지_않는다() throws Exception {
 		// given
-		OrderPaidEvent event = new OrderPaidEvent(43L, 11L, 3L, 7L, 4_500);
+		OrderPaidEvent event = new OrderPaidEvent(43L, 11L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0));
 			doThrow(new RankingRebuildInProgressException())
 			.doThrow(new RankingRebuildInProgressException())
 			.doThrow(new RankingRebuildInProgressException())

@@ -8,6 +8,7 @@ import com.example.coffeeordersystem.outbox.dto.OrderPaidEvent;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 import org.junit.jupiter.api.AfterAll;
@@ -61,10 +62,10 @@ class RedisRankingAggregationRedisIntegrationTest {
 	}
 
 	@Test
-	void 동일_eventId를_두번_처리해도_실제_Redis_ZSET_점수는_한번만_증가하고_TTL이_설정된다() {
+	void 자정_이후_지연_소비와_재소비에도_주문일_ZSET_점수는_한번만_증가하고_TTL이_설정된다() {
 		// given
-		OrderPaidEvent event = new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500);
-		String rankingKey = RedisRankingKey.dailyRanking(java.time.LocalDate.of(2026, 7, 15));
+		OrderPaidEvent event = new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 14, 23, 59, 59));
+		String rankingKey = RedisRankingKey.dailyRanking(java.time.LocalDate.of(2026, 7, 14));
 		String processedKey = RedisRankingKey.processedEvent(event.eventId());
 
 		// when
@@ -75,6 +76,9 @@ class RedisRankingAggregationRedisIntegrationTest {
 		assertThat(firstAggregated).isTrue();
 		assertThat(duplicateAggregated).isFalse();
 		assertThat(redisTemplate.opsForZSet().score(rankingKey, "7")).isEqualTo(1.0);
+		assertThat(redisTemplate.opsForZSet().score(
+			RedisRankingKey.dailyRanking(java.time.LocalDate.of(2026, 7, 15)), "7"
+		)).isNull();
 		assertThat(redisTemplate.getExpire(rankingKey)).isPositive().isLessThanOrEqualTo(KEY_TTL.getSeconds());
 		assertThat(redisTemplate.getExpire(processedKey)).isPositive().isLessThanOrEqualTo(KEY_TTL.getSeconds());
 	}
@@ -83,7 +87,7 @@ class RedisRankingAggregationRedisIntegrationTest {
 	void 실제_Redis_재구성_잠금이_있으면_집계를_중단한다() {
 		// given
 		redisTemplate.opsForValue().set(RedisRankingKey.rebuilding(), "1", Duration.ofMinutes(1));
-		OrderPaidEvent event = new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500);
+		OrderPaidEvent event = new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0));
 
 		// when
 		org.assertj.core.api.ThrowableAssert.ThrowingCallable aggregate = () -> service.aggregate(event);
