@@ -53,7 +53,7 @@ public class OrderService {
 		int paymentAmount = calculatePaymentAmount(menu.getPrice(), request.quantity());
 		Point point = findPoint(user);
 
-		existingOrderResponse = findExistingOrderResponse(request, idempotencyKey);
+		existingOrderResponse = findExistingOrderResponseWithPessimisticLock(request, idempotencyKey);
 		if (existingOrderResponse.isPresent()) {
 			return existingOrderResponse.get();
 		}
@@ -77,6 +77,14 @@ public class OrderService {
 			.map(order -> getExistingOrderResponse(order, request.menuId(), request.quantity()));
 	}
 
+	private Optional<OrderCreateResponse> findExistingOrderResponseWithPessimisticLock(
+		OrderCreateRequest request,
+		String idempotencyKey
+	) {
+		return orderRepository.findByUserIdAndIdempotencyKeyWithPessimisticLock(request.userId(), idempotencyKey)
+			.map(order -> getExistingOrderResponse(order, request.menuId(), request.quantity()));
+	}
+
 	private User findUserForUpdate(Long userId) {
 		return userRepository.findByIdWithPessimisticLock(userId)
 			.orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
@@ -88,7 +96,7 @@ public class OrderService {
 	}
 
 	private Point findPoint(User user) {
-		return pointRepository.findByUserId(user.getId())
+		return pointRepository.findByUserIdWithPessimisticLock(user.getId())
 			.orElseThrow(() -> new BusinessException(ErrorCode.POINT_NOT_FOUND));
 	}
 
@@ -96,7 +104,7 @@ public class OrderService {
 		if (!isSameOrderRequest(order, menuId, quantity)) {
 			throw new BusinessException(ErrorCode.IDEMPOTENCY_KEY_CONFLICT);
 		}
-		PointHistory pointHistory = pointHistoryRepository.findByOrderId(order.getId())
+		PointHistory pointHistory = pointHistoryRepository.findByOrderIdWithPessimisticLock(order.getId())
 			.orElseThrow(() -> new BusinessException(ErrorCode.POINT_NOT_FOUND));
 		return OrderCreateResponse.from(order, pointHistory.getBalanceAfter());
 	}

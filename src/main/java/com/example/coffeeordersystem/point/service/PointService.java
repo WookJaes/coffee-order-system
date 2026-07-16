@@ -52,7 +52,7 @@ public class PointService {
 	}
 
 	private Point getOrCreatePoint(User user) {
-		return pointRepository.findByUserId(user.getId())
+		return pointRepository.findByUserIdWithPessimisticLock(user.getId())
 			.orElseGet(() -> pointRepository.save(new Point(user, 0)));
 	}
 }
