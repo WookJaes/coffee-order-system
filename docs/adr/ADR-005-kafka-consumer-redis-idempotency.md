@@ -14,7 +14,7 @@ Issue #7의 `order-paid` Consumer는 Kafka의 at-least-once 전달 환경에서 
 
 - 랭킹 키: `coffee:ranking:{yyyy-MM-dd}`
 - 중복 마커 키: `coffee:ranking:processed:{orderEventId}`
-- `OrderPaidEvent`는 `orders.ordered_at`의 Asia/Seoul 주문 시각을 포함하며, Consumer는 처리 시각이 아니라 이 시각의 날짜로 랭킹·완료 상태 키를 선택한다.
+- `OrderPaidEvent`는 `orders.ordered_at`의 Asia/Seoul 주문 시각을 포함하며, Consumer는 처리 시각이 아니라 이 시각의 날짜로 랭킹·완료 상태 키를 선택한다. `orderedAt`이 없는 이전 형식 메시지는 `orderId`로 주문 원장을 조회해 주문 시각을 보완한다.
 - 이미 마커가 있으면 점수를 늘리지 않는다.
 - 마커와 일자별 랭킹 키는 최근 7일 조회와 재처리 여유를 고려해 최소 8일 이상 보관한다.
 - 일시적 실패는 Kafka 재시도 정책으로 처리하고, 정해진 횟수 내에 실패하면 DLT로 보낸다. DLT 재처리는 같은 이벤트 ID를 사용하므로 이미 반영된 점수를 다시 증가시키지 않는다.

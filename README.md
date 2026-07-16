@@ -103,7 +103,7 @@ Optional<Point> findByUserIdWithPessimisticLock(Long userId);
 
 이를 해결하기 위해 주문 성공 시 `order_events` 테이블에 전송 대상 이벤트를 함께 저장한다. 별도 Publisher는 조건부 DB 갱신으로 `PENDING -> PROCESSING`을 선점하고 트랜잭션 밖에서 Kafka를 발행한다. 성공 시 `SENT`, 실패 시 실패 횟수를 증가시켜 backoff 뒤 `PENDING`으로 되돌리거나 초기 발행 뒤 최대 재시도 횟수를 초과하면 `FAILED`로 상태를 관리한다. 오래된 `PROCESSING` 이벤트는 다음 Publisher 실행에서 회복한다.
 
-발행 메시지는 `eventId`, `orderId`, `userId`, `menuId`, `paymentAmount`, `orderedAt` JSON 필드를 가진다. `orderedAt`은 `orders.ordered_at`의 실제 주문 시각이며, Kafka 발행 지연이나 재전달에도 Consumer가 주문일 키를 선택하는 기준이다. Kafka 메시지 키는 주문 단위 순서를 위한 `orderId` 문자열이다. 기본 토픽은 `order-paid`이고 `OUTBOX_TOPIC`, `OUTBOX_PUBLISHER_FIXED_DELAY`, `OUTBOX_PUBLISHER_BATCH_SIZE`, `OUTBOX_PUBLISHER_MAX_RETRY_COUNT`, `OUTBOX_PUBLISHER_RETRY_BACKOFF`, `OUTBOX_PUBLISHER_PROCESSING_TIMEOUT`으로 운영 환경에서 조정한다.
+발행 메시지는 `eventId`, `orderId`, `userId`, `menuId`, `paymentAmount`, `orderedAt` JSON 필드를 가진다. `orderedAt`은 `orders.ordered_at`의 실제 주문 시각이며, Kafka 발행 지연이나 재전달에도 Consumer가 주문일 키를 선택하는 기준이다. 이전 형식 메시지처럼 이 필드가 없으면 Consumer는 `orderId`로 주문 원장을 조회해 주문 시각을 보완한다. Kafka 메시지 키는 주문 단위 순서를 위한 `orderId` 문자열이다. 기본 토픽은 `order-paid`이고 `OUTBOX_TOPIC`, `OUTBOX_PUBLISHER_FIXED_DELAY`, `OUTBOX_PUBLISHER_BATCH_SIZE`, `OUTBOX_PUBLISHER_MAX_RETRY_COUNT`, `OUTBOX_PUBLISHER_RETRY_BACKOFF`, `OUTBOX_PUBLISHER_PROCESSING_TIMEOUT`으로 운영 환경에서 조정한다.
 
 Kafka Consumer는 기본적으로 at-least-once 방식으로 동작하므로 같은 메시지가 두 번 이상 처리될 수 있다. 따라서 DB에 저장되는 중요한 데이터는 `orderId` 또는 이벤트 ID 기준으로 멱등 처리한다. 반복 재시도 후에도 처리하지 못한 메시지는 DLT(Dead Letter Topic)로 이동시켜 운영자가 원인을 확인하고 재처리할 수 있도록 한다.
 
