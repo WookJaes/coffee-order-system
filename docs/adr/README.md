@@ -18,3 +18,4 @@ ADR은 `Proposed`, `Accepted`, `Superseded`, `Rejected` 상태를 사용한다. 
 | [ADR-004](ADR-004-outbox-publisher-retry.md) | Outbox 발행 상태 전이와 재시도 |
 | [ADR-005](ADR-005-kafka-consumer-redis-idempotency.md) | 이벤트 ID 기준 Redis 랭킹 중복 방지 |
 | [ADR-006](ADR-006-seven-day-ranking-read.md) | 최근 7일 Redis 랭킹 합산과 동점 정렬 |
+| [ADR-007](ADR-007-point-locking-read-after-user-lock.md) | 사용자 잠금 뒤 포인트·멱등성 이력 locking read |

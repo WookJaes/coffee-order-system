@@ -2,7 +2,7 @@
 
 ## 상태
 
-Implemented. 결정일: 2026-07-14, 구현일: 2026-07-15.
+Superseded. 결정일: 2026-07-14, 구현일: 2026-07-15. 2026-07-16에 [ADR-007](ADR-007-point-locking-read-after-user-lock.md)의 `users -> points` locking read 정책으로 대체됐다.
 
 ## 맥락
 
