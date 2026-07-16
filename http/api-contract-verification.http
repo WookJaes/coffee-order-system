@@ -103,6 +103,7 @@ GET {{baseUrl}}/api/menus/popular
     client.assert(response.body.status === 200, "expected body status 200");
     client.assert(response.body.message === "요청이 성공했습니다.", "unexpected success message");
     client.assert(Array.isArray(response.body.data), "expected data array");
+    client.assert(response.body.data.length > 0, "expected ranking for the order created in this file");
     response.body.data.forEach(function (menu) {
       client.assert(menu.rank !== undefined, "expected rank");
       client.assert(menu.menuId !== undefined, "expected menuId");

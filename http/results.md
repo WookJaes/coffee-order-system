@@ -11,7 +11,7 @@
 **실행일:** 2026-07-16
 
 **실행 도구:** JetBrains HTTP Client CLI (`jetbrains/intellij-http-client`)
-**결과:** `RUN SUCCESSFUL`, JUnit `tests=15`, `failures=0`, `errors=0`, `skip=0`
+**결과:** `RUN SUCCESSFUL`, JUnit `tests=15`, `failures=0`, `errors=0`, `skip=0` (PR 리뷰 보완 후 재실행 포함)
 
 | 시나리오 | 결과 | 관찰값 |
 | --- | --- | --- |

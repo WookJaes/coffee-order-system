@@ -29,7 +29,7 @@ USER_COUNT=8 scripts/k6/prepare-synthetic-users.sh
 
 ## 실행 원칙
 
-- `BASE_URL`, `USERS_FILE`, 메뉴 ID, VU 수는 환경변수로 전달한다. 스크립트 안에 고정하지 않는다.
+- `BASE_URL`, `USERS_FILE`, `K6_MENU_ID`, VU 수는 환경변수로 전달한다. 스크립트 안에 고정하지 않는다.
 - 같은 사용자 주문 실행 전후에는 DB 스냅샷을 남긴다. 최종 잔액은 0 이상이고, 성공 주문 수·`USE` 이력 수·Outbox 수의 증가분은 같아야 한다.
 - synthetic 사용자 생성 스크립트는 `build/k6/synthetic-users.json`에 사용자 ID만 기록한다. k6 `setup()`은 이 사용자에게 포인트 충전 API를 호출한 뒤 주문을 시작한다.
 - k6 출력에서 HTTP 성공/실패 수, 오류율, `http_req_duration`와 시나리오별 P95를 결과 문서에 기록한다.
@@ -42,10 +42,10 @@ USER_COUNT=8 scripts/k6/prepare-synthetic-users.sh
 HTTP와 k6 스크립트가 추가된 뒤 아래 형식을 사용한다.
 
 ```bash
-k6 run -e BASE_URL=http://localhost:8080 -e USER_ID=<user-id> -e MENU_ID=<menu-id> k6/same-user-order.js
-k6 run -e BASE_URL=http://localhost:8080 -e USERS_FILE=build/k6/synthetic-users.json -e MENU_ID=<menu-id> k6/order-load.js
-k6 run -e BASE_URL=http://localhost:8080 -e USERS_FILE=build/k6/synthetic-users.json -e MENU_ID=<menu-id> k6/order-stress.js
-k6 run -e BASE_URL=http://localhost:8080 -e USERS_FILE=build/k6/synthetic-users.json -e MENU_ID=<menu-id> k6/order-spike.js
+k6 run -e BASE_URL=http://localhost:8080 -e USER_ID=<user-id> -e K6_MENU_ID=<menu-id> k6/same-user-order.js
+k6 run -e BASE_URL=http://localhost:8080 -e USERS_FILE=build/k6/synthetic-users.json -e K6_MENU_ID=<menu-id> k6/order-load.js
+k6 run -e BASE_URL=http://localhost:8080 -e USERS_FILE=build/k6/synthetic-users.json -e K6_MENU_ID=<menu-id> k6/order-stress.js
+k6 run -e BASE_URL=http://localhost:8080 -e USERS_FILE=build/k6/synthetic-users.json -e K6_MENU_ID=<menu-id> k6/order-spike.js
 ```
 
 `heavy` 프로필은 명시적으로만 실행한다.
