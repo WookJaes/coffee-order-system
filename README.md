@@ -62,7 +62,7 @@
 
 예를 들어 10,000P를 가진 사용자가 6,000P 메뉴를 동시에 2번 주문하면, 동시성 제어가 없을 경우 두 주문이 모두 성공하여 잔액이 음수가 될 수 있다.
 
-이를 방지하기 위해 주문 결제 시 `points`의 사용자별 row에 DB 비관적 락을 적용한다.
+이를 방지하기 위해 충전과 주문 결제 모두 `users` row를 먼저, 기존 `points` row를 다음으로 DB 비관적 락으로 읽는다. MySQL `REPEATABLE-READ`에서 사용자 잠금 대기 뒤에도 최신 포인트를 읽도록 `points` 조회는 locking read를 사용한다.
 
 본 과제에서는 포인트 차감 대상이 사용자별 `points` row로 명확하다. 따라서 Redis 분산락보다 DB 비관적 락이 더 단순하고, 트랜잭션과 함께 설명하기 쉽다고 판단했다.
 
@@ -81,8 +81,8 @@
 
 ```java
 @Lock(LockModeType.PESSIMISTIC_WRITE)
-@Query("select p from Point p where p.user.id = :userId")
-Optional<Point> findByUserIdForUpdate(Long userId);
+@Query("select point from Point point where point.user.id = :userId")
+Optional<Point> findByUserIdWithPessimisticLock(Long userId);
 ```
 
 ### 2.5 주문 완료 이벤트 발행 전략

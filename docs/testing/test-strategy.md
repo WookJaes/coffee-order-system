@@ -16,7 +16,7 @@
 - 메뉴 없음, 품절 메뉴, 포인트 없음, 잔액 부족, 1 미만 수량
 - 수량별 총 결제금액과 포인트 사용 이력·Outbox 금액 정합성
 - 같은 멱등성 키 재시도(이후 포인트 변동에도 최초 응답 유지), 같은 키의 다른 요청
-- 동일 사용자 동시 주문 시 잔액과 주문 수의 정합성
+- 실제 MySQL 또는 Testcontainers MySQL에서 동일 사용자 동시 주문 시 `balance = 초기 잔액 + CHARGE 합계 - USE 합계`, `balance >= 0`, 성공 주문 수 = `USE` 이력 수 = Outbox 수, 각 `USE.balance_after`의 누적 차감 정합성
 - 같은 사용자의 충전·주문 교차 동시성에서 `CHARGE - USE`와 최종 잔액 일치, 음수 잔액 방지, 성공 `USE` 이력·주문·Outbox 수 일치
 - 교차 실행 중 잔액 부족 주문은 잔액의 충전분 외 주문·`USE` 이력·Outbox를 남기지 않음
 - Outbox `PENDING` 발행 성공 후 `SENT`, 발행 실패 뒤 backoff·재시도 횟수·`FAILED` 전이
