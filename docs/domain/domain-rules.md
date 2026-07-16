@@ -28,9 +28,9 @@
 - 포인트 사용 이력은 `USE` 타입, 주문 금액, 차감 후 잔액과 주문 연관관계를 저장한다. 충전 이력의 주문 연관관계는 없다.
 - 주문 1건에는 `order_id` 유니크 제약으로 Outbox 이벤트 1건만 연결한다.
 - Outbox 이벤트는 주문 트랜잭션에서 `PENDING`, `retry_count=0`, 즉시 발행 가능한 시각으로 저장한다.
-- Publisher는 DB 조건부 갱신으로 `PENDING -> PROCESSING`을 선점하고, Kafka 발행 성공 시 `SENT`로 전이한다.
+- Publisher는 DB 조건부 갱신으로 `PENDING -> PROCESSING`을 선점하고, Kafka 발행 성공 시 `SENT`로 전이한다. Kafka 발행을 기다리는 동안에는 같은 선점 토큰 조건으로 처리 lease 시각을 갱신해 유효한 Publisher가 단순 처리 제한 시간 경과로 선점을 잃지 않는다.
 - Kafka 발행 실패 시 실패 횟수를 증가시킨다. 초기 발행 실패 뒤 최대 재시도 횟수를 초과하면 `FAILED`, 아니면 backoff 뒤 `PENDING`으로 되돌린다.
-- `PROCESSING`이 설정된 처리 제한 시간을 넘기면 `PENDING`으로 회복한다. Kafka는 at-least-once이므로 Consumer는 이벤트 ID 멱등 처리가 필요하다.
+- lease 갱신이 멈춘 `PROCESSING`이 설정된 처리 제한 시간을 넘기면 `PENDING`으로 회복한다. 따라서 Publisher 프로세스 중단 또는 lease 상실 뒤에도 다음 Publisher가 at-least-once 발행을 계속한다. Kafka는 at-least-once이므로 Consumer는 이벤트 ID 멱등 처리가 필요하다.
 
 ## 이벤트와 랭킹
 
