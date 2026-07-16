@@ -103,7 +103,7 @@ Optional<Point> findByUserIdWithPessimisticLock(Long userId);
 
 이를 해결하기 위해 주문 성공 시 `order_events` 테이블에 전송 대상 이벤트를 함께 저장한다. 별도 Publisher는 조건부 DB 갱신으로 `PENDING -> PROCESSING`을 선점하고 트랜잭션 밖에서 Kafka를 발행한다. 성공 시 `SENT`, 실패 시 실패 횟수를 증가시켜 backoff 뒤 `PENDING`으로 되돌리거나 초기 발행 뒤 최대 재시도 횟수를 초과하면 `FAILED`로 상태를 관리한다. 오래된 `PROCESSING` 이벤트는 다음 Publisher 실행에서 회복한다.
 
-발행 메시지는 `eventId`, `orderId`, `userId`, `menuId`, `paymentAmount` JSON 필드를 가지며, Kafka 메시지 키는 주문 단위 순서를 위한 `orderId` 문자열이다. 기본 토픽은 `order-paid`이고 `OUTBOX_TOPIC`, `OUTBOX_PUBLISHER_FIXED_DELAY`, `OUTBOX_PUBLISHER_BATCH_SIZE`, `OUTBOX_PUBLISHER_MAX_RETRY_COUNT`, `OUTBOX_PUBLISHER_RETRY_BACKOFF`, `OUTBOX_PUBLISHER_PROCESSING_TIMEOUT`으로 운영 환경에서 조정한다.
+발행 메시지는 `eventId`, `orderId`, `userId`, `menuId`, `paymentAmount`, `orderedAt` JSON 필드를 가진다. `orderedAt`은 `orders.ordered_at`의 실제 주문 시각이며, Kafka 발행 지연이나 재전달에도 Consumer가 주문일 키를 선택하는 기준이다. Kafka 메시지 키는 주문 단위 순서를 위한 `orderId` 문자열이다. 기본 토픽은 `order-paid`이고 `OUTBOX_TOPIC`, `OUTBOX_PUBLISHER_FIXED_DELAY`, `OUTBOX_PUBLISHER_BATCH_SIZE`, `OUTBOX_PUBLISHER_MAX_RETRY_COUNT`, `OUTBOX_PUBLISHER_RETRY_BACKOFF`, `OUTBOX_PUBLISHER_PROCESSING_TIMEOUT`으로 운영 환경에서 조정한다.
 
 Kafka Consumer는 기본적으로 at-least-once 방식으로 동작하므로 같은 메시지가 두 번 이상 처리될 수 있다. 따라서 DB에 저장되는 중요한 데이터는 `orderId` 또는 이벤트 ID 기준으로 멱등 처리한다. 반복 재시도 후에도 처리하지 못한 메시지는 DLT(Dead Letter Topic)로 이동시켜 운영자가 원인을 확인하고 재처리할 수 있도록 한다.
 
@@ -121,6 +121,8 @@ score: 주문 횟수
 
 최근 7일 인기 메뉴 조회 시에는 최근 7일의 일자별 ZSET을 합산하여 상위 3개 메뉴를 반환한다.
 
+일자별 Redis 키는 `OrderPaidEvent.orderedAt`을 Asia/Seoul 날짜로 변환해 선택하므로, Kafka 지연은 7일 집계의 주문일을 바꾸지 않는다.
+
 ```text
 coffee:ranking:{yyyy-MM-dd} 7개 키
 -> ZUNIONSTORE 또는 애플리케이션 합산
@@ -129,7 +131,7 @@ coffee:ranking:{yyyy-MM-dd} 7개 키
 
 Redis ZSET을 사용하는 이유는 인기 메뉴 조회가 자주 호출될 수 있고, 매번 `orders` 테이블을 집계하면 데이터가 많아질수록 조회 비용이 커지기 때문이다. Redis는 메뉴별 주문 수 증가와 상위 랭킹 조회에 적합하다.
 
-`order-paid` Consumer는 `product-ranking-group`으로 메시지를 소비한다. 동시성, 키·마커 TTL, 재시도 횟수와 DLT 토픽은 `RANKING_CONSUMER_*`, `RANKING_REDIS_KEY_TTL` 환경 변수로 설정한다. Redis 재구성 잠금은 `RANKING_REDIS_REBUILD_LOCK_TTL`, 주기적 lease 연장은 이보다 짧아야 하는 `RANKING_REDIS_REBUILD_LOCK_RENEW_INTERVAL`로 분리한다. `.env.example`은 3개 파티션을 병렬 처리하도록 동시성 3, 잠금 TTL `PT1M`, 연장 주기 `PT20S`를 예시로 제공한다. `eventId` 중복 마커와 `coffee:ranking:{yyyy-MM-dd}` ZSET의 `menuId` 점수 증가는 `src/main/resources/scripts/ranking-process-once.lua`의 Redis Lua로 원자 처리하므로 Kafka 재전달도 점수를 중복 증가시키지 않는다. 스크립트는 애플리케이션 시작 시 classpath resource에서 한 번 로드한다. 이벤트 한 건은 주문 횟수 1건으로 집계하며, 인기 메뉴 조회 API는 후속 범위다.
+`order-paid` Consumer는 `product-ranking-group`으로 메시지를 소비한다. 일자별 랭킹·상태 키의 날짜는 Consumer 처리 시각이 아니라 이벤트 `orderedAt`을 Asia/Seoul 날짜로 변환한 값이다. 따라서 자정 이후의 지연 소비나 재소비도 원장 주문일에 반영된다. 동시성, 키·마커 TTL, 재시도 횟수와 DLT 토픽은 `RANKING_CONSUMER_*`, `RANKING_REDIS_KEY_TTL` 환경 변수로 설정한다. Redis 재구성 잠금은 `RANKING_REDIS_REBUILD_LOCK_TTL`, 주기적 lease 연장은 이보다 짧아야 하는 `RANKING_REDIS_REBUILD_LOCK_RENEW_INTERVAL`로 분리한다. `.env.example`은 3개 파티션을 병렬 처리하도록 동시성 3, 잠금 TTL `PT1M`, 연장 주기 `PT20S`를 예시로 제공한다. `eventId` 중복 마커와 `coffee:ranking:{yyyy-MM-dd}` ZSET의 `menuId` 점수 증가는 `src/main/resources/scripts/ranking-process-once.lua`의 Redis Lua로 원자 처리하므로 Kafka 재전달도 점수를 중복 증가시키지 않는다. 스크립트는 애플리케이션 시작 시 classpath resource에서 한 번 로드한다. 이벤트 한 건은 주문 횟수 1건으로 집계하며, 인기 메뉴 조회 API는 후속 범위다.
 
 다만 Redis 랭킹은 실시간 조회 최적화 용도이다. 정확한 주문 원장은 `orders` 테이블이며, Redis 장애 또는 데이터 유실 시에는 `orders` 기준으로 랭킹을 재구성할 수 있어야 한다.
 

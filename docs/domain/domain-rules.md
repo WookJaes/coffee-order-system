@@ -36,6 +36,7 @@
 
 - `orders`는 주문과 인기 메뉴의 원본 데이터다.
 - `order_events`는 Kafka 발행 대상 Outbox다.
+- `OrderPaidEvent`는 주문 원장(`orders.ordered_at`)의 Asia/Seoul 주문 시각을 포함하며, Consumer는 처리 시각과 관계없이 이 주문 시각의 날짜를 일별 Redis 랭킹·완료 상태 키에 사용한다.
 - Redis ZSET은 조회 최적화를 위한 파생 데이터다.
 - Consumer는 이벤트 ID 기준으로 중복 소비를 방지한다.
 - Consumer는 Redis 원자 연산으로 중복 마커 등록과 날짜별 ZSET 주문 수 증가를 함께 처리한다.
