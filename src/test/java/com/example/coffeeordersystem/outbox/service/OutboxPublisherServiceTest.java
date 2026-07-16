@@ -106,7 +106,9 @@ class OutboxPublisherServiceTest {
 		ArgumentCaptor<OrderPaidEvent> messageCaptor = ArgumentCaptor.forClass(OrderPaidEvent.class);
 		verify(kafkaTemplate).send(eq(properties.topic()), eq(event.orderId().toString()), messageCaptor.capture());
 		assertThat(messageCaptor.getValue())
-			.isEqualTo(new OrderPaidEvent(event.eventId(), event.orderId(), event.userId(), event.menuId(), 4_500));
+			.isEqualTo(new OrderPaidEvent(
+				event.eventId(), event.orderId(), event.userId(), event.menuId(), 4_500, event.orderedAt()
+			));
 	}
 
 	@Test
@@ -199,9 +201,10 @@ class OutboxPublisherServiceTest {
 		pointRepository.save(new Point(user, 10_000));
 		var response = orderService.create(new OrderCreateRequest(user.getId(), menu.getId(), 1), key);
 		OrderEvent event = orderEventRepository.findAll().get(0);
-		return new EventFixture(event.getId(), response.orderId(), user.getId(), menu.getId());
+		LocalDateTime orderedAt = orderRepository.findById(response.orderId()).orElseThrow().getOrderedAt();
+		return new EventFixture(event.getId(), response.orderId(), user.getId(), menu.getId(), orderedAt);
 	}
 
-	private record EventFixture(Long eventId, Long orderId, Long userId, Long menuId) {
+	private record EventFixture(Long eventId, Long orderId, Long userId, Long menuId, LocalDateTime orderedAt) {
 	}
 }

@@ -16,6 +16,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -161,7 +162,7 @@ class PopularMenuRankingRedisIntegrationTest {
 			redisTemplate, Duration.ofDays(8), Clock.fixed(Instant.parse("2026-07-15T01:00:00Z"), ZoneId.of("Asia/Seoul")),
 			processOnceScript()
 		);
-		OrderPaidEvent event = new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500);
+		OrderPaidEvent event = new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0));
 		ExecutorService rebuildExecutor = Executors.newSingleThreadExecutor();
 
 		// when
