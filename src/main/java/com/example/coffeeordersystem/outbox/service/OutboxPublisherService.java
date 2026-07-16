@@ -33,16 +33,26 @@ public class OutboxPublisherService {
 		OrderPaidEvent event = claimedEvent.message();
 
 		try {
-			CompletableFuture<?> sendResult = kafkaTemplate.send(properties.topic(), event.orderId().toString(), event);
+			CompletableFuture<?> sendResult = CompletableFuture.supplyAsync(
+				() -> kafkaTemplate.send(properties.topic(), event.orderId().toString(), event)
+			).thenCompose(result -> result);
 			if (awaitKafkaPublishWhileRenewingLease(sendResult, event.eventId(), claimedEvent.token())) {
-				outboxEventCompletionService.markSent(event.eventId(), claimedEvent.token());
+				if (!outboxEventCompletionService.markSent(event.eventId(), claimedEvent.token())) {
+					log.warn("Outbox event processing lease lost before completion. eventId={}", event.eventId());
+				}
 			}
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
-			outboxEventCompletionService.markFailed(event.eventId(), claimedEvent.token(), exception);
+			markFailedIfClaimed(event.eventId(), claimedEvent.token(), exception);
 		} catch (ExecutionException | RuntimeException exception) {
-			outboxEventCompletionService.markFailed(event.eventId(), claimedEvent.token(), exception);
+			markFailedIfClaimed(event.eventId(), claimedEvent.token(), exception);
 			log.warn("Outbox event publish failed. eventId={}", event.eventId(), exception);
+		}
+	}
+
+	private void markFailedIfClaimed(Long eventId, String token, Throwable throwable) {
+		if (!outboxEventCompletionService.markFailed(eventId, token, throwable)) {
+			log.warn("Outbox event processing lease lost before failure completion. eventId={}", eventId);
 		}
 	}
 

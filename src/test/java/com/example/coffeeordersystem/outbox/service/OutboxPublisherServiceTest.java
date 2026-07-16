@@ -54,6 +54,9 @@ class OutboxPublisherServiceTest {
 	private OutboxEventClaimService outboxEventClaimService;
 
 	@Autowired
+	private OutboxEventCompletionService outboxEventCompletionService;
+
+	@Autowired
 	private OutboxPublisherProperties properties;
 
 	@Autowired
@@ -172,31 +175,30 @@ class OutboxPublisherServiceTest {
 	}
 
 	@Test
-	void Kafka_발행이_처리_제한_시간을_넘어도_유효한_선점은_다른_Publisher가_회수하지_않는다() throws Exception {
+	void Kafka_발행_호출이_처리_제한_시간을_넘어도_유효한_선점은_다른_Publisher가_회수하지_않는다() throws Exception {
 		// given
 		EventFixture event = createOrderEvent("long-running-send");
-		CountDownLatch sendStarted = new CountDownLatch(1);
-		CountDownLatch releaseSend = new CountDownLatch(1);
-		CompletableFuture<Void> delayedSend = CompletableFuture.supplyAsync(() -> {
-			sendStarted.countDown();
+		CountDownLatch sendInvocationStarted = new CountDownLatch(1);
+		CountDownLatch releaseSendInvocation = new CountDownLatch(1);
+		doAnswer(invocation -> {
+			sendInvocationStarted.countDown();
 			try {
-				releaseSend.await();
+				releaseSendInvocation.await();
 			} catch (InterruptedException exception) {
 				Thread.currentThread().interrupt();
 			}
-			return null;
-		});
-		doAnswer(invocation -> delayedSend).when(kafkaTemplate)
+			return CompletableFuture.completedFuture(null);
+		}).when(kafkaTemplate)
 			.send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 
 		// when
 		ExecutorService executor = Executors.newFixedThreadPool(2);
 		Future<?> first = executor.submit(outboxPublisherService::publishPendingEvents);
-		sendStarted.await();
+		sendInvocationStarted.await();
 		Thread.sleep(properties.processingTimeout().plusMillis(500).toMillis());
 		Future<?> second = executor.submit(outboxPublisherService::publishPendingEvents);
 		Thread.sleep(200);
-		releaseSend.countDown();
+		releaseSendInvocation.countDown();
 		first.get();
 		second.get();
 		executor.shutdown();
@@ -204,6 +206,21 @@ class OutboxPublisherServiceTest {
 		// then
 		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
 		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+	}
+
+	@Test
+	void lease를_잃은_Publisher의_완료_처리는_상태를_변경하지_않는다() {
+		// given
+		EventFixture event = createOrderEvent("lost-lease");
+		outboxEventClaimService.claimPendingEvents();
+
+		// when
+		boolean sent = outboxEventCompletionService.markSent(event.eventId(), "lost-token");
+
+		// then
+		assertThat(sent).isFalse();
+		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus())
+			.isEqualTo(OrderEventStatus.PROCESSING);
 	}
 
 	@Test
