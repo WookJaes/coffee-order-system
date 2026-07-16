@@ -35,7 +35,7 @@
 | 날짜 | 프로필 | 스크립트 | 최대 VU | 실행 길이 | 주문 iterations | 주문 오류율 | P95 | threshold | 비고 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-07-16 | safe | `same-user-order.js` | 5 | VU별 1회 | 5 | 0.00% | 68.13 ms | PASS | P99 69.38 ms, 16.48 orders/s, 전체 HTTP 6건, 서로 다른 키 |
-| 2026-07-16 | safe | `order-load.js` | 2 | 16초 | 54 | 0.00% | 47.60 ms | PASS | P99 63.15 ms, 3.79 orders/s, 전체 HTTP 62건, 새 사용자 2명·setup 충전 8건 |
+| 2026-07-16 | safe | `order-load.js` | 2 | 14초 | 54 | 0.00% | 47.60 ms | PASS | P99 63.15 ms, 3.79 orders/s, 전체 HTTP 62건, 새 사용자 2명·setup 충전 8건 |
 | 2026-07-16 | safe | `order-stress.js` | 6 | 16초 | 208 | 0.00% | 44.13 ms | PASS | P99 93.91 ms, 12.80 orders/s, 전체 HTTP 232건, 새 사용자 6명·setup 충전 24건 |
 | 2026-07-16 | safe | `order-spike.js` | 8 | 16초 | 298 | 0.00% | 35.26 ms | PASS | P99 94.23 ms, 18.41 orders/s, 전체 HTTP 330건, 새 사용자 8명·setup 충전 32건 |
 
