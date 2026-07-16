@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -42,7 +43,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-@SpringBootTest
+@SpringBootTest(properties = "outbox.publisher.processing-timeout=PT1S")
 @ActiveProfiles("test")
 class OutboxPublisherServiceTest {
 
@@ -166,6 +167,41 @@ class OutboxPublisherServiceTest {
 		second.get();
 		executor.shutdown();
 
+		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
+		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+	}
+
+	@Test
+	void Kafka_발행이_처리_제한_시간을_넘어도_유효한_선점은_다른_Publisher가_회수하지_않는다() throws Exception {
+		// given
+		EventFixture event = createOrderEvent("long-running-send");
+		CountDownLatch sendStarted = new CountDownLatch(1);
+		CountDownLatch releaseSend = new CountDownLatch(1);
+		CompletableFuture<Void> delayedSend = CompletableFuture.supplyAsync(() -> {
+			sendStarted.countDown();
+			try {
+				releaseSend.await();
+			} catch (InterruptedException exception) {
+				Thread.currentThread().interrupt();
+			}
+			return null;
+		});
+		doAnswer(invocation -> delayedSend).when(kafkaTemplate)
+			.send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+
+		// when
+		ExecutorService executor = Executors.newFixedThreadPool(2);
+		Future<?> first = executor.submit(outboxPublisherService::publishPendingEvents);
+		sendStarted.await();
+		Thread.sleep(properties.processingTimeout().plusMillis(500).toMillis());
+		Future<?> second = executor.submit(outboxPublisherService::publishPendingEvents);
+		Thread.sleep(200);
+		releaseSend.countDown();
+		first.get();
+		second.get();
+		executor.shutdown();
+
+		// then
 		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
 		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 	}

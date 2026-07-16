@@ -4,7 +4,10 @@ import com.example.coffeeordersystem.outbox.config.OutboxPublisherProperties;
 import com.example.coffeeordersystem.outbox.dto.ClaimedOrderEvent;
 import com.example.coffeeordersystem.outbox.dto.OrderPaidEvent;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,14 +33,36 @@ public class OutboxPublisherService {
 		OrderPaidEvent event = claimedEvent.message();
 
 		try {
-			kafkaTemplate.send(properties.topic(), event.orderId().toString(), event).get();
-			outboxEventCompletionService.markSent(event.eventId(), claimedEvent.token());
+			CompletableFuture<?> sendResult = kafkaTemplate.send(properties.topic(), event.orderId().toString(), event);
+			if (awaitKafkaPublishWhileRenewingLease(sendResult, event.eventId(), claimedEvent.token())) {
+				outboxEventCompletionService.markSent(event.eventId(), claimedEvent.token());
+			}
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
 			outboxEventCompletionService.markFailed(event.eventId(), claimedEvent.token(), exception);
 		} catch (ExecutionException | RuntimeException exception) {
 			outboxEventCompletionService.markFailed(event.eventId(), claimedEvent.token(), exception);
 			log.warn("Outbox event publish failed. eventId={}", event.eventId(), exception);
+		}
+	}
+
+	private boolean awaitKafkaPublishWhileRenewingLease(
+		CompletableFuture<?> sendResult,
+		Long eventId,
+		String token
+	) throws InterruptedException, ExecutionException {
+		long renewalIntervalMillis = Math.max(1, properties.processingTimeout().toMillis() / 3);
+
+		while (true) {
+			try {
+				sendResult.get(renewalIntervalMillis, TimeUnit.MILLISECONDS);
+				return true;
+			} catch (TimeoutException exception) {
+				if (!outboxEventClaimService.renewProcessingLease(eventId, token)) {
+					log.warn("Outbox event processing lease lost. eventId={}", eventId);
+					return false;
+				}
+			}
 		}
 	}
 }
