@@ -7,6 +7,8 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 
 import org.mockito.ArgumentCaptor;
 
@@ -33,13 +35,17 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -85,6 +91,18 @@ class OutboxPublisherServiceTest {
 
 	@MockitoBean
 	private KafkaTemplate<String, OrderPaidEvent> kafkaTemplate;
+
+	@MockitoBean(name = "outboxKafkaSendExecutor")
+	private AsyncTaskExecutor outboxKafkaSendExecutor;
+
+	@BeforeEach
+	void submitKafkaSendTask() {
+		doAnswer(invocation -> {
+			FutureTask<Void> task = new FutureTask<>(invocation.getArgument(0, Runnable.class), null);
+			CompletableFuture.runAsync(task);
+			return task;
+		}).when(outboxKafkaSendExecutor).submit(any(Runnable.class));
+	}
 
 	@AfterEach
 	void tearDown() {
@@ -221,6 +239,43 @@ class OutboxPublisherServiceTest {
 		assertThat(sent).isFalse();
 		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus())
 			.isEqualTo(OrderEventStatus.PROCESSING);
+	}
+
+	@Test
+	void Kafka_send_작업이_거절되면_lease를_연장하지_않고_기존_실패_재시도_경로로_전환한다() {
+		// given
+		EventFixture event = createOrderEvent("executor-rejected");
+		doThrow(new TaskRejectedException("outbox send executor saturated"))
+			.when(outboxKafkaSendExecutor).submit(any(Runnable.class));
+
+		// when
+		outboxPublisherService.publishPendingEvents();
+
+		// then
+		OrderEvent retried = orderEventRepository.findById(event.eventId()).orElseThrow();
+		assertThat(retried.getStatus()).isEqualTo(OrderEventStatus.PENDING);
+		assertThat(retried.getRetryCount()).isEqualTo(1);
+		assertThat(retried.getLastError()).contains("outbox send executor saturated");
+		verify(kafkaTemplate, never()).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+	}
+
+	@Test
+	void Kafka_send_작업이_시작되지_않으면_취소하고_기존_실패_재시도_경로로_전환한다() {
+		// given
+		EventFixture event = createOrderEvent("executor-not-started");
+		FutureTask<Void> notStartedTask = new FutureTask<>(() -> null);
+		doReturn(notStartedTask).when(outboxKafkaSendExecutor).submit(any(Runnable.class));
+
+		// when
+		outboxPublisherService.publishPendingEvents();
+
+		// then
+		OrderEvent retried = orderEventRepository.findById(event.eventId()).orElseThrow();
+		assertThat(notStartedTask.isCancelled()).isTrue();
+		assertThat(retried.getStatus()).isEqualTo(OrderEventStatus.PENDING);
+		assertThat(retried.getRetryCount()).isEqualTo(1);
+		assertThat(retried.getLastError()).contains("Outbox Kafka send 작업이 시작되지 않았습니다.");
+		verify(kafkaTemplate, never()).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 	}
 
 	@Test

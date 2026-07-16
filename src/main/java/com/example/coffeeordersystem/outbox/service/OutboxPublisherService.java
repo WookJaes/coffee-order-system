@@ -6,13 +6,17 @@ import com.example.coffeeordersystem.outbox.dto.OrderPaidEvent;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -23,6 +27,8 @@ public class OutboxPublisherService {
 	private final OutboxEventClaimService outboxEventClaimService;
 	private final OutboxEventCompletionService outboxEventCompletionService;
 	private final KafkaTemplate<String, OrderPaidEvent> kafkaTemplate;
+	@Qualifier("outboxKafkaSendExecutor")
+	private final AsyncTaskExecutor outboxKafkaSendExecutor;
 	private final OutboxPublisherProperties properties;
 
 	public void publishPendingEvents() {
@@ -33,10 +39,7 @@ public class OutboxPublisherService {
 		OrderPaidEvent event = claimedEvent.message();
 
 		try {
-			CompletableFuture<?> sendResult = CompletableFuture.supplyAsync(
-				() -> kafkaTemplate.send(properties.topic(), event.orderId().toString(), event)
-			).thenCompose(result -> result);
-			if (awaitKafkaPublishWhileRenewingLease(sendResult, event.eventId(), claimedEvent.token())) {
+			if (publishKafkaWhileRenewingLease(event, claimedEvent.token())) {
 				if (!outboxEventCompletionService.markSent(event.eventId(), claimedEvent.token())) {
 					log.warn("Outbox event processing lease lost before completion. eventId={}", event.eventId());
 				}
@@ -47,6 +50,54 @@ public class OutboxPublisherService {
 		} catch (ExecutionException | RuntimeException exception) {
 			markFailedIfClaimed(event.eventId(), claimedEvent.token(), exception);
 			log.warn("Outbox event publish failed. eventId={}", event.eventId(), exception);
+		}
+	}
+
+	private boolean publishKafkaWhileRenewingLease(OrderPaidEvent event, String token)
+		throws InterruptedException, ExecutionException {
+		CompletableFuture<CompletableFuture<?>> sendInvocation = new CompletableFuture<>();
+		AtomicBoolean sendStarted = new AtomicBoolean(false);
+		Future<?> sendTask = outboxKafkaSendExecutor.submit(() -> {
+			sendStarted.set(true);
+			try {
+				sendInvocation.complete(kafkaTemplate.send(properties.topic(), event.orderId().toString(), event));
+			} catch (RuntimeException exception) {
+				sendInvocation.completeExceptionally(exception);
+			}
+		});
+
+		CompletableFuture<?> sendResult = awaitSendInvocationWhileRenewingLease(
+			sendInvocation,
+			sendTask,
+			sendStarted,
+			event.eventId(),
+			token
+		);
+		return sendResult != null && awaitKafkaPublishWhileRenewingLease(sendResult, event.eventId(), token);
+	}
+
+	private CompletableFuture<?> awaitSendInvocationWhileRenewingLease(
+		CompletableFuture<CompletableFuture<?>> sendInvocation,
+		Future<?> sendTask,
+		AtomicBoolean sendStarted,
+		Long eventId,
+		String token
+	) throws InterruptedException, ExecutionException {
+		long renewalIntervalMillis = renewalIntervalMillis();
+
+		while (true) {
+			try {
+				return sendInvocation.get(renewalIntervalMillis, TimeUnit.MILLISECONDS);
+			} catch (TimeoutException exception) {
+				if (!sendStarted.get()) {
+					sendTask.cancel(false);
+					throw new IllegalStateException("Outbox Kafka send 작업이 시작되지 않았습니다.");
+				}
+				if (!outboxEventClaimService.renewProcessingLease(eventId, token)) {
+					log.warn("Outbox event processing lease lost. eventId={}", eventId);
+					return null;
+				}
+			}
 		}
 	}
 
@@ -61,7 +112,7 @@ public class OutboxPublisherService {
 		Long eventId,
 		String token
 	) throws InterruptedException, ExecutionException {
-		long renewalIntervalMillis = Math.max(1, properties.processingTimeout().toMillis() / 3);
+		long renewalIntervalMillis = renewalIntervalMillis();
 
 		while (true) {
 			try {
@@ -74,5 +125,9 @@ public class OutboxPublisherService {
 				}
 			}
 		}
+	}
+
+	private long renewalIntervalMillis() {
+		return properties.processingTimeout().toMillis() / 3;
 	}
 }
