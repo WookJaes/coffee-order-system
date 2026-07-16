@@ -1,0 +1,113 @@
+### Issue #9 HTTP contract verification
+### JetBrains HTTP Client file. Start the application first, then run requests in order.
+### Each run creates a new order key; retry uses the same key within this file.
+
+@baseUrl = http://localhost:8080
+@userId = 1
+@menuId = 1
+@chargeAmount = 100000
+@orderQuantity = 1
+@orderIdempotencyKey = issue9-{{$random.uuid}}
+@insufficientOrderIdempotencyKey = issue9-insufficient-{{$random.uuid}}
+
+### 1. Point charge succeeds
+POST {{baseUrl}}/api/points/charge
+Content-Type: application/json
+
+{
+  "userId": {{userId}},
+  "amount": {{chargeAmount}}
+}
+
+> {%
+  client.test("point charge returns the common success contract", function () {
+    client.assert(response.status === 200, "expected HTTP 200");
+    client.assert(response.body.status === 200, "expected body status 200");
+    client.assert(response.body.message === "요청이 성공했습니다.", "unexpected success message");
+    client.assert(response.body.data !== undefined, "expected data");
+    client.assert(response.body.data.userId === 1, "unexpected userId");
+  });
+%}
+
+### 2. Order and point payment succeeds
+POST {{baseUrl}}/api/orders
+Content-Type: application/json
+Idempotency-Key: {{orderIdempotencyKey}}
+
+{
+  "userId": {{userId}},
+  "menuId": {{menuId}},
+  "quantity": {{orderQuantity}}
+}
+
+> {%
+  client.test("order returns the created contract", function () {
+    client.assert(response.status === 201, "expected HTTP 201");
+    client.assert(response.body.status === 201, "expected body status 201");
+    client.assert(response.body.message === "주문 및 결제가 성공적으로 완료되었습니다.", "unexpected order message");
+    client.assert(response.body.data.orderId !== undefined, "expected orderId");
+    client.assert(response.body.data.status === "PAID", "expected PAID order");
+  });
+  client.global.set("issue9OrderId", response.body.data.orderId);
+  client.global.set("issue9RemainingPoint", response.body.data.remainingPoint);
+%}
+
+### 3. Same key retry returns the original result without another debit
+POST {{baseUrl}}/api/orders
+Content-Type: application/json
+Idempotency-Key: {{orderIdempotencyKey}}
+
+{
+  "userId": {{userId}},
+  "menuId": {{menuId}},
+  "quantity": {{orderQuantity}}
+}
+
+> {%
+  client.test("same idempotency key returns the original order result", function () {
+    client.assert(response.status === 201, "expected HTTP 201");
+    client.assert(response.body.status === 201, "expected body status 201");
+    client.assert(response.body.data.orderId === Number(client.global.get("issue9OrderId")), "orderId changed on retry");
+    client.assert(response.body.data.remainingPoint === Number(client.global.get("issue9RemainingPoint")), "remainingPoint changed on retry");
+  });
+%}
+
+### 4. Insufficient balance fails with the documented failure contract
+### 477218 * 4500 = 2147481000, the largest practical menu-1 payment below Integer.MAX_VALUE.
+POST {{baseUrl}}/api/orders
+Content-Type: application/json
+Idempotency-Key: {{insufficientOrderIdempotencyKey}}
+
+{
+  "userId": {{userId}},
+  "menuId": {{menuId}},
+  "quantity": 477218
+}
+
+> {%
+  client.test("insufficient balance has no data or internal error code", function () {
+    client.assert(response.status === 400, "expected HTTP 400");
+    client.assert(response.body.status === 400, "expected body status 400");
+    client.assert(response.body.message === "포인트가 부족합니다.", "unexpected insufficient-point message");
+    client.assert(response.body.data === undefined, "failure response must not include data");
+    client.assert(response.body.code === undefined, "failure response must not include an internal error code");
+  });
+%}
+
+### 5. Popular menu lookup returns the common success contract
+GET {{baseUrl}}/api/menus/popular
+
+> {%
+  client.test("popular menu returns the common success contract", function () {
+    client.assert(response.status === 200, "expected HTTP 200");
+    client.assert(response.body.status === 200, "expected body status 200");
+    client.assert(response.body.message === "요청이 성공했습니다.", "unexpected success message");
+    client.assert(Array.isArray(response.body.data), "expected data array");
+    response.body.data.forEach(function (menu) {
+      client.assert(menu.rank !== undefined, "expected rank");
+      client.assert(menu.menuId !== undefined, "expected menuId");
+      client.assert(menu.menuName !== undefined, "expected menuName");
+      client.assert(menu.orderCount !== undefined, "expected orderCount");
+    });
+  });
+%}
