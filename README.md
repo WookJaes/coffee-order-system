@@ -101,7 +101,7 @@ Optional<Point> findByUserIdWithPessimisticLock(Long userId);
 
 주문 트랜잭션 안에서 Kafka를 직접 호출하면 Kafka 장애가 주문 실패로 전파될 수 있다. 반대로 주문 저장 후 Kafka 발행만 수행하다가 실패하면 주문 데이터가 수집 플랫폼으로 전달되지 않고 유실될 수 있다.
 
-이를 해결하기 위해 주문 성공 시 `order_events` 테이블에 전송 대상 이벤트를 함께 저장한다. 별도 Publisher는 조건부 DB 갱신으로 `PENDING -> PROCESSING`을 선점하고 트랜잭션 밖에서 Kafka를 발행한다. 성공 시 `SENT`, 실패 시 실패 횟수를 증가시켜 backoff 뒤 `PENDING`으로 되돌리거나 초기 발행 뒤 최대 재시도 횟수를 초과하면 `FAILED`로 상태를 관리한다. 오래된 `PROCESSING` 이벤트는 다음 Publisher 실행에서 회복한다.
+이를 해결하기 위해 주문 성공 시 `order_events` 테이블에 전송 대상 이벤트를 함께 저장한다. 별도 Publisher는 조건부 DB 갱신으로 `PENDING -> PROCESSING`을 선점하고 트랜잭션 밖에서 Kafka를 발행한다. Kafka 발행 성공 뒤 `SENT` DB 기록이 실패하면 이를 Kafka 발행 실패로 처리하거나 실패 횟수를 증가시키지 않고 `PROCESSING` 선점 상태를 보존한다. lease 갱신이 멈춰 오래된 `PROCESSING`이 되면 다음 Publisher 실행에서 `PENDING`으로 회복해 재발행할 수 있으므로 Kafka 전달은 at-least-once다. Kafka 발행 자체가 실패하면 실패 횟수를 증가시켜 backoff 뒤 `PENDING`으로 되돌리거나 초기 발행 뒤 최대 재시도 횟수를 초과하면 `FAILED`로 상태를 관리한다.
 
 발행 메시지는 `eventId`, `orderId`, `userId`, `menuId`, `paymentAmount`, `orderedAt` JSON 필드를 가진다. `orderedAt`은 `orders.ordered_at`의 실제 주문 시각이며, Kafka 발행 지연이나 재전달에도 Consumer가 주문일 키를 선택하는 기준이다. 이전 형식 메시지처럼 이 필드가 없으면 Consumer는 `orderId`로 주문 원장을 조회해 주문 시각을 보완한다. Kafka 메시지 키는 주문 단위 순서를 위한 `orderId` 문자열이다. 기본 토픽은 `order-paid`이고 `OUTBOX_TOPIC`, `OUTBOX_PUBLISHER_FIXED_DELAY`, `OUTBOX_PUBLISHER_BATCH_SIZE`, `OUTBOX_PUBLISHER_MAX_RETRY_COUNT`, `OUTBOX_PUBLISHER_RETRY_BACKOFF`, `OUTBOX_PUBLISHER_PROCESSING_TIMEOUT`으로 운영 환경에서 조정한다.
 
