@@ -37,19 +37,30 @@ public class OutboxPublisherService {
 
 	private void publish(ClaimedOrderEvent claimedEvent) {
 		OrderPaidEvent event = claimedEvent.message();
+		boolean kafkaPublished;
 
 		try {
-			if (publishKafkaWhileRenewingLease(event, claimedEvent.token())) {
-				if (!outboxEventCompletionService.markSent(event.eventId(), claimedEvent.token())) {
-					log.warn("Outbox event processing lease lost before completion. eventId={}", event.eventId());
-				}
-			}
+			kafkaPublished = publishKafkaWhileRenewingLease(event, claimedEvent.token());
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
 			markFailedIfClaimed(event.eventId(), claimedEvent.token(), exception);
+			return;
 		} catch (ExecutionException | RuntimeException exception) {
 			markFailedIfClaimed(event.eventId(), claimedEvent.token(), exception);
 			log.warn("Outbox event publish failed. eventId={}", event.eventId(), exception);
+			return;
+		}
+
+		if (!kafkaPublished) {
+			return;
+		}
+
+		try {
+			if (!outboxEventCompletionService.markSent(event.eventId(), claimedEvent.token())) {
+				log.warn("Outbox event processing lease lost before completion. eventId={}", event.eventId());
+			}
+		} catch (RuntimeException exception) {
+			log.warn("Outbox event Kafka publish succeeded but DB completion failed. eventId={}", event.eventId(), exception);
 		}
 	}
 

@@ -2,6 +2,7 @@ package com.example.coffeeordersystem.outbox.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doAnswer;
@@ -22,6 +23,7 @@ import com.example.coffeeordersystem.order.repository.OrderEventRepository;
 import com.example.coffeeordersystem.order.repository.OrderRepository;
 import com.example.coffeeordersystem.order.service.OrderService;
 import com.example.coffeeordersystem.outbox.config.OutboxPublisherProperties;
+import com.example.coffeeordersystem.outbox.dto.ClaimedOrderEvent;
 import com.example.coffeeordersystem.outbox.dto.OrderPaidEvent;
 import com.example.coffeeordersystem.point.entity.Point;
 import com.example.coffeeordersystem.point.repository.PointRepository;
@@ -48,6 +50,7 @@ import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 @SpringBootTest(properties = "outbox.publisher.processing-timeout=PT1S")
 @ActiveProfiles("test")
@@ -59,7 +62,7 @@ class OutboxPublisherServiceTest {
 	@Autowired
 	private OutboxEventClaimService outboxEventClaimService;
 
-	@Autowired
+	@MockitoSpyBean
 	private OutboxEventCompletionService outboxEventCompletionService;
 
 	@Autowired
@@ -116,12 +119,15 @@ class OutboxPublisherServiceTest {
 
 	@Test
 	void PENDING_이벤트를_Kafka에_발행한_후_SENT로_변경한다() {
+		// given
 		EventFixture event = createOrderEvent("success");
 		doReturn(CompletableFuture.completedFuture(null)).when(kafkaTemplate)
 			.send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 
+		// when
 		outboxPublisherService.publishPendingEvents();
 
+		// then
 		OrderEvent published = orderEventRepository.findById(event.eventId()).orElseThrow();
 		assertThat(published.getStatus()).isEqualTo(OrderEventStatus.SENT);
 		assertThat(published.getRetryCount()).isZero();
@@ -134,13 +140,53 @@ class OutboxPublisherServiceTest {
 	}
 
 	@Test
+	void Kafka_발행_성공_후_SENT_기록에_실패하면_실패_재시도_경로로_전이하지_않고_stale_회복_뒤_재발행한다() {
+		// given
+		EventFixture event = createOrderEvent("completion-failure");
+		doReturn(CompletableFuture.completedFuture(null)).when(kafkaTemplate)
+			.send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+		doThrow(new IllegalStateException("database completion unavailable"))
+			.doCallRealMethod()
+			.when(outboxEventCompletionService)
+			.markSent(eq(event.eventId()), anyString());
+
+		// when
+		outboxPublisherService.publishPendingEvents();
+
+		// then
+		OrderEvent completionFailed = orderEventRepository.findById(event.eventId()).orElseThrow();
+		assertThat(completionFailed.getStatus()).isEqualTo(OrderEventStatus.PROCESSING);
+		assertThat(completionFailed.getRetryCount()).isZero();
+		assertThat(completionFailed.getLastError()).isNull();
+		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+
+		// when
+		jdbcTemplate.update(
+			"update order_events set processing_started_at = ? where id = ?",
+			LocalDateTime.now().minus(properties.processingTimeout()).minusSeconds(1),
+			event.eventId()
+		);
+
+		outboxPublisherService.publishPendingEvents();
+
+		// then
+		OrderEvent replayed = orderEventRepository.findById(event.eventId()).orElseThrow();
+		assertThat(replayed.getStatus()).isEqualTo(OrderEventStatus.SENT);
+		assertThat(replayed.getRetryCount()).isZero();
+		verify(kafkaTemplate, times(2)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+	}
+
+	@Test
 	void Kafka_발행_실패는_재시도_횟수를_증가시키고_PENDING으로_되돌린다() {
+		// given
 		EventFixture event = createOrderEvent("retry");
 		doReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable"))).when(kafkaTemplate)
 			.send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 
+		// when
 		outboxPublisherService.publishPendingEvents();
 
+		// then
 		OrderEvent retried = orderEventRepository.findById(event.eventId()).orElseThrow();
 		assertThat(retried.getStatus()).isEqualTo(OrderEventStatus.PENDING);
 		assertThat(retried.getRetryCount()).isEqualTo(1);
@@ -150,14 +196,17 @@ class OutboxPublisherServiceTest {
 
 	@Test
 	void 최대_재시도_횟수를_초과하면_FAILED로_변경한다() {
+		// given
 		EventFixture event = createOrderEvent("failed");
 		doReturn(CompletableFuture.failedFuture(new IllegalStateException("broker unavailable"))).when(kafkaTemplate)
 			.send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 
+		// when
 		for (int attempt = 0; attempt <= properties.maxRetryCount(); attempt++) {
 			outboxPublisherService.publishPendingEvents();
 		}
 
+		// then
 		OrderEvent failed = orderEventRepository.findById(event.eventId()).orElseThrow();
 		assertThat(failed.getStatus()).isEqualTo(OrderEventStatus.FAILED);
 		assertThat(failed.getRetryCount()).isEqualTo(properties.maxRetryCount() + 1);
@@ -165,6 +214,7 @@ class OutboxPublisherServiceTest {
 
 	@Test
 	void 동일_이벤트를_동시에_처리해도_한번만_선점하고_발행한다() throws Exception {
+		// given
 		EventFixture event = createOrderEvent("concurrent");
 		CountDownLatch sendStarted = new CountDownLatch(1);
 		CountDownLatch releaseSend = new CountDownLatch(1);
@@ -179,6 +229,7 @@ class OutboxPublisherServiceTest {
 		})).when(kafkaTemplate)
 			.send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 
+		// when
 		ExecutorService executor = Executors.newFixedThreadPool(2);
 		Future<?> first = executor.submit(outboxPublisherService::publishPendingEvents);
 		sendStarted.await();
@@ -188,6 +239,7 @@ class OutboxPublisherServiceTest {
 		second.get();
 		executor.shutdown();
 
+		// then
 		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
 		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 	}
@@ -242,6 +294,29 @@ class OutboxPublisherServiceTest {
 	}
 
 	@Test
+	void stale_회복으로_다른_토큰이_선점한_이벤트를_이전_Publisher가_완료_처리할_수_없다() {
+		// given
+		EventFixture event = createOrderEvent("reclaimed-by-another-publisher");
+		ClaimedOrderEvent firstClaim = outboxEventClaimService.claimPendingEvents().get(0);
+		jdbcTemplate.update(
+			"update order_events set processing_started_at = ? where id = ?",
+			LocalDateTime.now().minus(properties.processingTimeout()).minusSeconds(1),
+			event.eventId()
+		);
+		ClaimedOrderEvent secondClaim = outboxEventClaimService.claimPendingEvents().get(0);
+
+		// when
+		boolean completedByPreviousPublisher = outboxEventCompletionService.markSent(event.eventId(), firstClaim.token());
+
+		// then
+		OrderEvent claimedByCurrentPublisher = orderEventRepository.findById(event.eventId()).orElseThrow();
+		assertThat(firstClaim.token()).isNotEqualTo(secondClaim.token());
+		assertThat(completedByPreviousPublisher).isFalse();
+		assertThat(claimedByCurrentPublisher.getStatus()).isEqualTo(OrderEventStatus.PROCESSING);
+		assertThat(claimedByCurrentPublisher.getProcessingToken()).isEqualTo(secondClaim.token());
+	}
+
+	@Test
 	void Kafka_send_작업이_거절되면_lease를_연장하지_않고_기존_실패_재시도_경로로_전환한다() {
 		// given
 		EventFixture event = createOrderEvent("executor-rejected");
@@ -280,17 +355,21 @@ class OutboxPublisherServiceTest {
 
 	@Test
 	void 오래된_PROCESSING_이벤트를_회복해_다시_발행한다() {
+		// given
 		EventFixture event = createOrderEvent("recovery");
 		outboxEventClaimService.claimPendingEvents();
 		doReturn(CompletableFuture.completedFuture(null)).when(kafkaTemplate)
 			.send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 
+		// when
 		outboxPublisherService.publishPendingEvents();
 
+		// then
 		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus())
 			.isEqualTo(OrderEventStatus.PROCESSING);
 		verify(kafkaTemplate, times(0)).send(any(), any(), any(OrderPaidEvent.class));
 
+		// when
 		jdbcTemplate.update(
 			"update order_events set processing_started_at = ? where id = ?",
 			LocalDateTime.now().minus(properties.processingTimeout()).minusSeconds(1),
@@ -299,6 +378,7 @@ class OutboxPublisherServiceTest {
 
 		outboxPublisherService.publishPendingEvents();
 
+		// then
 		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
 		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 	}
