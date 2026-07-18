@@ -26,6 +26,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 public class PopularMenuRankingService {
@@ -76,7 +77,7 @@ public class PopularMenuRankingService {
 		this.clock = clock;
 	}
 
-	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ, propagation = Propagation.REQUIRES_NEW)
 	public List<PopularMenuRanking> getPopularMenuRankings() {
 		LocalDate today = LocalDate.now(clock);
 		Map<Long, Long> orderCounts = readRedisRankings(today);
