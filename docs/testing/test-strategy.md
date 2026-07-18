@@ -24,7 +24,7 @@
 - 교차 실행 중 잔액 부족 주문은 잔액의 충전분 외 주문·`USE` 이력·Outbox를 남기지 않음
 - Outbox `PENDING` 발행 성공 후 `SENT`, Kafka 발행 성공 뒤 `SENT` DB 기록 실패 시 실패 backoff·재시도 횟수·`FAILED` 전이 없이 `PROCESSING` 보존과 stale recovery 뒤 at-least-once 재발행, Kafka 발행 실패 뒤 backoff·재시도 횟수·`FAILED` 전이
 - stale recovery로 다른 선점 토큰이 이벤트를 다시 선점한 뒤 이전 Publisher의 완료·실패 처리가 상태를 덮어쓰지 않는지 확인
-- Kafka `send()` 호출 자체 또는 발행 완료가 `processingTimeout`을 넘어도 유효한 lease를 갱신하는 Publisher의 이벤트를 다른 Publisher가 회수·재선점·재발행하지 않는지, 두 Publisher의 같은 이벤트 동시 선점 방지와 lease 갱신이 멈춘 오래된 `PROCESSING` 회복
+- Kafka `send()` 호출 자체 또는 발행 완료가 `processingTimeout`을 넘어도 유효한 Publisher의 현재 이벤트와 같은 선점 토큰의 배치 대기 이벤트 lease가 함께 갱신되어 다른 Publisher가 회수·재선점·재발행하지 않는지, 두 Publisher의 같은 이벤트 동시 선점 방지와 lease 갱신이 멈춘 오래된 `PROCESSING` 회복
 - Kafka send executor 거절 또는 작업 미시작 시 Kafka 호출 없이 기존 backoff·재시도 경로로 전환하는지 확인
 - Kafka 중복 메시지, Redis 갱신 실패 후 DLT 이동
 - Redis Lua 집계의 날짜별 키·TTL·메뉴 주문 수 증가와 같은 `eventId`의 중복 무증가, 자정 경계·지연 소비에도 이벤트 주문 시각의 Asia/Seoul 날짜 키 선택. `orderedAt`이 없는 이전 Kafka 메시지는 주문 원장으로 시각을 보완한다.
