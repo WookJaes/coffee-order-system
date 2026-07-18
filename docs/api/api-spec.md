@@ -55,7 +55,7 @@ Base path: `/api`
 
 ### POST /api/orders
 
-메뉴 한 건을 포인트로 결제한다. `Idempotency-Key` 헤더는 필수이며 null 또는 blank면 400으로 실패한다.
+메뉴 한 건을 포인트로 결제한다. `Idempotency-Key` 헤더는 필수이며 null 또는 blank거나 100자를 초과하면 400으로 실패한다. 100자 키는 허용한다.
 
 Headers:
 
@@ -131,3 +131,7 @@ Idempotency-Key: 4de91f71-4c2d-4eb9-bc8e-2b0f4603a1fb
 ### 예외 처리 기준
 
 예외 코드는 서버 내부 `ErrorCode` enum과 예외 처리 분기에서만 사용한다. 실패 응답 JSON에는 예외 코드를 포함하지 않고 `status`, `message`만 반환한다.
+
+- 지원하지 않는 HTTP 메서드는 405 공통 오류 응답을 반환한다.
+- 지원하지 않는 Content-Type은 415 공통 오류 응답을 반환한다.
+- 예상하지 못한 예외는 내부 상세를 노출하지 않는 500 공통 오류 응답을 반환하고 ERROR 로그를 남긴다.
