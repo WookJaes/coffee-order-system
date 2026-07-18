@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 
 class GlobalExceptionHandlerTest {
 
@@ -40,5 +42,51 @@ class GlobalExceptionHandlerTest {
 		// then
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
 		assertThat(response.getBody()).hasFieldOrPropertyWithValue("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
+	}
+
+	@Test
+	void 지원하지_않는_HTTP_메서드는_405_공통_오류_응답으로_변환한다() {
+		// given
+		HttpRequestMethodNotSupportedException exception = new HttpRequestMethodNotSupportedException("GET");
+
+		// when
+		var response = exceptionHandler.handleHttpRequestMethodNotSupportedException(
+			exception
+		);
+
+		// then
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
+		assertThat(response.getBody()).hasFieldOrPropertyWithValue("status", HttpStatus.METHOD_NOT_ALLOWED.value());
+		assertThat(response.getBody()).hasFieldOrPropertyWithValue("message", "지원하지 않는 HTTP 메서드입니다.");
+	}
+
+	@Test
+	void 지원하지_않는_Content_Type은_415_공통_오류_응답으로_변환한다() {
+		// given
+		HttpMediaTypeNotSupportedException exception = new HttpMediaTypeNotSupportedException("text/plain");
+
+		// when
+		var response = exceptionHandler.handleHttpMediaTypeNotSupportedException(
+			exception
+		);
+
+		// then
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+		assertThat(response.getBody()).hasFieldOrPropertyWithValue("status", HttpStatus.UNSUPPORTED_MEDIA_TYPE.value());
+		assertThat(response.getBody()).hasFieldOrPropertyWithValue("message", "지원하지 않는 Content-Type입니다.");
+	}
+
+	@Test
+	void 예상하지_못한_예외는_내부_상세_없이_500_공통_오류_응답으로_변환한다() {
+		// given
+		IllegalStateException exception = new IllegalStateException("internal exception detail");
+
+		// when
+		var response = exceptionHandler.handleException(exception);
+
+		// then
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+		assertThat(response.getBody()).hasFieldOrPropertyWithValue("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
+		assertThat(response.getBody()).hasFieldOrPropertyWithValue("message", "서버 오류가 발생했습니다.");
 	}
 }

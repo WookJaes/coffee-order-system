@@ -104,6 +104,24 @@ class OrderServiceTest {
 	}
 
 	@Test
+	void 길이가_100자인_멱등성_키로_주문_결제가_가능하다() {
+		// given
+		User user = userRepository.save(new User("100자 키 주문 사용자"));
+		Menu menu = menuRepository.save(new Menu("아메리카노", 4_500, MenuStatus.ACTIVE));
+		pointRepository.save(new Point(user, 10_000));
+
+		// when
+		var response = orderService.create(new OrderCreateRequest(user.getId(), menu.getId(), 1), "a".repeat(100));
+
+		// then
+		assertThat(response.orderId()).isNotNull();
+		assertThat(pointRepository.findByUserId(user.getId()).orElseThrow().getBalance()).isEqualTo(5_500);
+		assertThat(orderRepository.count()).isEqualTo(1);
+		assertThat(pointHistoryRepository.count()).isEqualTo(1);
+		assertThat(orderEventRepository.count()).isEqualTo(1);
+	}
+
+	@Test
 	void SOLD_OUT_메뉴는_MENU_NOT_ON_SALE로_실패한다() {
 		// given
 		User user = userRepository.save(new User("품절 주문 사용자"));
