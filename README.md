@@ -135,7 +135,7 @@ Redis ZSET을 사용하는 이유는 인기 메뉴 조회가 자주 호출될 �
 
 `order-paid` Consumer는 `product-ranking-group`으로 메시지를 소비한다. 일자별 랭킹·상태 키의 날짜는 Consumer 처리 시각이 아니라 이벤트 `orderedAt`을 Asia/Seoul 날짜로 변환한 값이다. 따라서 자정 이후의 지연 소비나 재소비도 원장 주문일에 반영된다. 동시성, 키·마커 TTL, 재시도 횟수와 DLT 토픽은 `RANKING_CONSUMER_*`, `RANKING_REDIS_KEY_TTL` 환경 변수로 설정한다. Redis 재구성 잠금은 `RANKING_REDIS_REBUILD_LOCK_TTL`, 주기적 lease 연장은 이보다 짧아야 하는 `RANKING_REDIS_REBUILD_LOCK_RENEW_INTERVAL`로 분리한다. `.env.example`은 3개 파티션을 병렬 처리하도록 동시성 3, 잠금 TTL `PT1M`, 연장 주기 `PT20S`를 예시로 제공한다. `eventId` 중복 마커와 `coffee:ranking:{yyyy-MM-dd}` ZSET의 `menuId` 점수 증가는 `src/main/resources/scripts/ranking-process-once.lua`의 Redis Lua로 원자 처리하므로 Kafka 재전달도 점수를 중복 증가시키지 않는다. 스크립트는 애플리케이션 시작 시 classpath resource에서 한 번 로드한다. 이벤트 한 건은 주문 횟수 1건으로 집계하며, 인기 메뉴 조회 API는 후속 범위다.
 
-다만 Redis 랭킹은 실시간 조회 최적화 용도이다. 정확한 주문 원장은 `orders` 테이블이며, Redis 장애 또는 데이터 유실 시에는 `orders` 기준으로 랭킹을 재구성할 수 있어야 한다.
+다만 Redis 랭킹은 실시간 조회 최적화 용도이다. 정확한 주문 원장은 `orders` 테이블이며, Redis 장애 또는 데이터 유실 시에는 `orders` 기준으로 랭킹을 재구성할 수 있어야 한다. 재구성의 `PAID` 일자 집계와 Outbox marker 조회는 호출자 트랜잭션을 suspend하는 독립적인 읽기 전용 `REPEATABLE_READ` 트랜잭션에서 수행한다. 따라서 두 조회 사이에 커밋된 주문이 점수와 marker 중 하나에만 반영되지 않는다.
 
 정확성 검증 또는 복구 기준 쿼리는 다음과 같다.
 
