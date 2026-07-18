@@ -3,5 +3,7 @@ spring:
     name: coffeeordersystem
   config:
     import: optional:file:.env[.properties]
+  flyway:
+    ignore-migration-patterns: 'versioned:missing'
   profiles:
     default: local
