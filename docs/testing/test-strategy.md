@@ -16,7 +16,7 @@
 - 메뉴 없음, 품절 메뉴, 포인트 없음, 잔액 부족, 1 미만 수량
 - 수량별 총 결제금액과 포인트 사용 이력·Outbox 금액 정합성
 - 같은 멱등성 키 재시도(이후 포인트 변동에도 최초 응답 유지), 같은 키의 다른 요청
-- 100개 Unicode 코드 포인트 `Idempotency-Key` 주문 성공과 101개 키의 HTTP 400 공통 오류 응답·서비스 미호출(주문·포인트·사용 이력·Outbox 무변경)
+- 100자 `Idempotency-Key` 주문 성공과 101자 키의 HTTP 400 공통 오류 응답·서비스 미호출(주문·포인트·사용 이력·Outbox 무변경)
 - `POST /api/orders`의 지원하지 않는 HTTP 메서드(405), 지원하지 않는 Content-Type(415), 예상하지 못한 예외의 내부 상세 없는 500 공통 오류 응답 및 ERROR 로그
 - 실제 MySQL 또는 Testcontainers MySQL에서 동일 사용자 동시 주문 시 `balance = 초기 잔액 + CHARGE 합계 - USE 합계`, `balance >= 0`, 성공 주문 수 = `USE` 이력 수 = Outbox 수, 각 `USE.balance_after`의 누적 차감 정합성
 - 같은 사용자의 충전·주문 교차 동시성에서 `CHARGE - USE`와 최종 잔액 일치, 음수 잔액 방지, 성공 `USE` 이력·주문·Outbox 수 일치
