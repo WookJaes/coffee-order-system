@@ -7,6 +7,7 @@ public enum ErrorCode {
 	// point
 	INVALID_USER_ID(HttpStatus.BAD_REQUEST, "사용자 ID는 필수입니다."),
 	INVALID_CHARGE_AMOUNT(HttpStatus.BAD_REQUEST, "충전 금액은 1 이상 100,000 이하여야 합니다."),
+	POINT_BALANCE_OVERFLOW(HttpStatus.BAD_REQUEST, "포인트 잔액은 최대 2,147,483,647까지 충전할 수 있습니다."),
 	USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."),
 	INSUFFICIENT_POINT(HttpStatus.BAD_REQUEST, "포인트가 부족합니다."),
 

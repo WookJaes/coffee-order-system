@@ -158,4 +158,22 @@ class PointControllerTest {
 			.andExpect(jsonPath("$.message").value("사용자를 찾을 수 없습니다."))
 			.andExpect(jsonPath("$.data").doesNotExist());
 	}
+
+	@Test
+	void 최대_허용_잔액을_초과하면_전용_오류의_400_실패_공통_응답을_반환한다() throws Exception {
+		// given
+		willThrow(new BusinessException(ErrorCode.POINT_BALANCE_OVERFLOW))
+			.given(pointService).charge(any());
+
+		// when
+		var result = mockMvc.perform(post("/api/points/charge")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"userId\":1,\"amount\":100000}"));
+
+		// then
+		result.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.status").value(HttpStatus.BAD_REQUEST.value()))
+			.andExpect(jsonPath("$.message").value("포인트 잔액은 최대 2,147,483,647까지 충전할 수 있습니다."))
+			.andExpect(jsonPath("$.data").doesNotExist());
+	}
 }

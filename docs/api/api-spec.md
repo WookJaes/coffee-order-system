@@ -45,7 +45,7 @@ Base path: `/api`
 
 ### POST /api/points/charge
 
-`amount`는 1 이상 100,000 이하여야 한다.
+`amount`는 1 이상 100,000 이하여야 한다. 충전 후 잔액이 `Integer.MAX_VALUE`(2,147,483,647)를 초과하면 `POINT_BALANCE_OVERFLOW`의 메시지로 HTTP 400을 반환하며, 포인트 잔액과 충전 이력은 변경하지 않는다. 실패 응답 JSON에는 내부 `ErrorCode` 이름을 포함하지 않는다.
 
 `local` 프로필에서만 로컬 전용 Flyway V3가 Postman 검증용 `userId=1`의 테스트 사용자를 사전 등록한다. 로컬이 아닌 환경의 공통 migration은 이 사용자를 생성하지 않는다. 요청·응답 계약은 변하지 않는다.
 

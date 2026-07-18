@@ -381,6 +381,7 @@ GET /api/menus
   ]
 }
 ```
+
 <br/>
 
 #### 포인트 충전 API
@@ -399,6 +400,8 @@ POST /api/points/charge
   "amount": 10000
 }
 ```
+
+충전 후 잔액은 `Integer.MAX_VALUE`(2,147,483,647)를 초과할 수 없다. 초과 요청은 잔액과 충전 이력을 변경하지 않고 HTTP 400으로 실패한다.
 
 성공 응답 예시:
 
@@ -429,6 +432,15 @@ POST /api/points/charge
 {
   "status": 400,
   "message": "충전 금액은 100,000 이하여야 합니다."
+}
+```
+
+실패 응답 예시(잔액 최대값 초과):
+
+```json
+{
+  "status": 400,
+  "message": "포인트 잔액은 최대 2,147,483,647까지 충전할 수 있습니다."
 }
 ```
 <br/>
@@ -546,6 +558,7 @@ GET /api/menus/popular
 | 존재하지 않는 메뉴 | MENU_NOT_FOUND | 404 | 요청한 메뉴 ID가 존재하지 않음 |
 | 판매 중이 아닌 메뉴 | MENU_NOT_ON_SALE | 400 | 품절 또는 숨김 상태 메뉴 |
 | 충전 금액 오류 | INVALID_CHARGE_AMOUNT | 400 | 충전 금액이 1 미만 또는 100,000 초과 |
+| 포인트 잔액 초과 | POINT_BALANCE_OVERFLOW | 400 | 충전 후 잔액이 `Integer.MAX_VALUE`를 초과함 |
 | 포인트 정보 없음 | POINT_NOT_FOUND | 404 | 주문 시 사용자 포인트 정보가 없음 |
 | 잔액 부족 | INSUFFICIENT_POINT | 400 | 포인트 잔액이 주문 금액보다 작음 |
 | 멱등성 키 누락 | IDEMPOTENCY_KEY_REQUIRED | 400 | 주문 요청에 멱등성 키가 없음 |
@@ -561,6 +574,7 @@ GET /api/menus/popular
 ### 6.1 단위 테스트
 
 - 포인트 충전 성공
+- 최대 잔액 경계 충전 성공과 초과 충전의 잔액·이력 무변경
 - 0 이하 금액 충전 실패
 - 주문 결제 성공
 - 동일 멱등성 키로 주문 재요청 시 기존 주문 결과 반환
@@ -574,6 +588,7 @@ GET /api/menus/popular
 
 - 메뉴 목록 조회 API
 - 포인트 충전 API
+- 최대 잔액 초과 충전의 HTTP 400 응답
 - 주문 및 결제 API
 - 주문/결제 멱등성 검증
 - 인기 메뉴 조회 API

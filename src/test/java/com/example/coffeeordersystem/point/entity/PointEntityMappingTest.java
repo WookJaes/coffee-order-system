@@ -1,7 +1,11 @@
 package com.example.coffeeordersystem.point.entity;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.example.coffeeordersystem.global.exception.BusinessException;
+import com.example.coffeeordersystem.global.exception.ErrorCode;
+import com.example.coffeeordersystem.user.entity.User;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToOne;
@@ -21,5 +25,20 @@ class PointEntityMappingTest {
 			.isEqualTo(FetchType.LAZY);
 		assertThat(PointHistory.class.getDeclaredField("user").getAnnotation(ManyToOne.class).fetch())
 			.isEqualTo(FetchType.LAZY);
+	}
+
+	@Test
+	void 잔액이_최대값을_넘는_충전은_전용_오류로_거절하고_잔액을_보존한다() {
+		// given
+		Point point = new Point(new User("엔티티 오버플로 사용자"), Integer.MAX_VALUE - 99_999);
+
+		// when
+		assertThatThrownBy(() -> point.charge(100_000))
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException)exception).getErrorCode())
+			.isEqualTo(ErrorCode.POINT_BALANCE_OVERFLOW);
+
+		// then
+		assertThat(point.getBalance()).isEqualTo(Integer.MAX_VALUE - 99_999);
 	}
 }

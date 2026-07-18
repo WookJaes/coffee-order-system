@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.example.coffeeordersystem.global.exception.BusinessException;
 import com.example.coffeeordersystem.global.exception.ErrorCode;
 import com.example.coffeeordersystem.point.dto.PointChargeRequest;
+import com.example.coffeeordersystem.point.entity.Point;
 import com.example.coffeeordersystem.point.entity.PointHistoryType;
 import com.example.coffeeordersystem.point.repository.PointHistoryRepository;
 import com.example.coffeeordersystem.point.repository.PointRepository;
@@ -81,6 +82,45 @@ class PointServiceTest {
 			.extracting(point -> point.getBalance())
 			.isEqualTo(10_000);
 		assertThat(pointHistoryRepository.findAll()).hasSize(2);
+	}
+
+	@Test
+	void 최대_허용_잔액까지_충전하면_성공하고_CHARGE_이력을_남긴다() {
+		// given
+		User user = userRepository.save(new User("최대 잔액 사용자"));
+		pointRepository.save(new Point(user, Integer.MAX_VALUE - 100_000));
+
+		// when
+		var response = pointService.charge(new PointChargeRequest(user.getId(), 100_000));
+
+		// then
+		assertThat(response.balance()).isEqualTo(Integer.MAX_VALUE);
+		assertThat(pointRepository.findByUserId(user.getId()).orElseThrow().getBalance()).isEqualTo(Integer.MAX_VALUE);
+		assertThat(pointHistoryRepository.findAll()).singleElement()
+			.satisfies(history -> {
+				assertThat(history.getType()).isEqualTo(PointHistoryType.CHARGE);
+				assertThat(history.getAmount()).isEqualTo(100_000);
+				assertThat(history.getBalanceAfter()).isEqualTo(Integer.MAX_VALUE);
+			});
+	}
+
+	@Test
+	void 최대_허용_잔액을_초과하면_전용_오류로_실패하고_잔액과_이력을_변경하지_않는다() {
+		// given
+		User user = userRepository.save(new User("오버플로 사용자"));
+		int initialBalance = Integer.MAX_VALUE - 99_999;
+		pointRepository.save(new Point(user, initialBalance));
+
+		// when
+		var exception = org.assertj.core.api.Assertions.catchThrowable(
+			() -> pointService.charge(new PointChargeRequest(user.getId(), 100_000))
+		);
+
+		// then
+		assertThat(exception).isInstanceOf(BusinessException.class);
+		assertThat(((BusinessException)exception).getErrorCode()).isEqualTo(ErrorCode.POINT_BALANCE_OVERFLOW);
+		assertThat(pointRepository.findByUserId(user.getId()).orElseThrow().getBalance()).isEqualTo(initialBalance);
+		assertThat(pointHistoryRepository.findAll()).isEmpty();
 	}
 
 	@Test
