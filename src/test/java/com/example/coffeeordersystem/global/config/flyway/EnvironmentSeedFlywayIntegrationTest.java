@@ -47,7 +47,7 @@ class EnvironmentSeedFlywayIntegrationTest {
 	}
 
 	@Test
-	void 신규_비로컬_DB는_공통_스키마와_메뉴_seed만_적용한다() throws Exception {
+	void 신규_로컬이_아닌_DB는_공통_스키마와_메뉴_seed만_적용한다() throws Exception {
 		// given
 		Flyway flyway = flyway("classpath:db/migration");
 
@@ -63,7 +63,7 @@ class EnvironmentSeedFlywayIntegrationTest {
 	}
 
 	@Test
-	void 기존_V3_이력이_있는_DB는_비로컬_설정으로_validate와_migrate에_성공한다() throws Exception {
+	void 기존_V3_이력이_있는_DB는_로컬이_아닌_설정으로_validate와_migrate에_성공한다() throws Exception {
 		// given
 		flyway("classpath:db/migration", "classpath:db/local-migration").migrate();
 
