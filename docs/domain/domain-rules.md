@@ -20,7 +20,7 @@
 - 주문은 메뉴 한 개를 대상으로 한다.
 - 주문 수량은 1 이상의 정수이며 `orders.quantity`에 저장한다.
 - 결제 금액은 주문 시점 메뉴 가격과 수량의 곱을 `order_price`에 저장한다.
-- 주문 결제는 `Idempotency-Key`가 필수이며 공백이 아니고 최대 100자다. 100자 초과 키는 주문·포인트·사용 이력·Outbox 저장 전에 HTTP 400으로 거부한다.
+- 주문 결제는 `Idempotency-Key`가 필수이며 공백이 아니고 최대 100개 Unicode 코드 포인트다. 100개 초과 키는 주문·포인트·사용 이력·Outbox 저장 전에 HTTP 400으로 거부한다.
 - 같은 `user_id + idempotency_key`의 메뉴와 수량이 같은 요청은 기존 주문 결과를 반환한다. `remainingPoint`는 해당 주문의 `USE` 이력에 저장된 차감 후 잔액으로 고정한다.
 - 같은 키로 메뉴 또는 수량이 다른 요청은 `IDEMPOTENCY_KEY_CONFLICT`로 실패한다.
 - 주문, 포인트 차감, 포인트 이력, Outbox 이벤트 저장은 하나의 트랜잭션이다.

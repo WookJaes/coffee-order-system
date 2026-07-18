@@ -55,7 +55,7 @@ Base path: `/api`
 
 ### POST /api/orders
 
-메뉴 한 건을 포인트로 결제한다. `Idempotency-Key` 헤더는 필수이며 null 또는 blank거나 100자를 초과하면 400으로 실패한다. 100자 키는 허용한다.
+메뉴 한 건을 포인트로 결제한다. `Idempotency-Key` 헤더는 필수이며 null 또는 blank거나 100개 Unicode 코드 포인트를 초과하면 400으로 실패한다. 100개 키는 허용한다.
 
 Headers:
 

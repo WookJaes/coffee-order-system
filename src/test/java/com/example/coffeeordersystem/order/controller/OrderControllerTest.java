@@ -84,6 +84,23 @@ class OrderControllerTest {
 	}
 
 	@Test
+	void 코드_포인트가_100개인_이모지_멱등성_키는_기존_주문_흐름에서_허용한다() throws Exception {
+		// given
+		String idempotencyKey = "😀".repeat(100);
+		given(orderService.create(any(), eq(idempotencyKey)))
+			.willReturn(new OrderCreateResponse(1L, 1L, 1L, 1, 4_500, 5_500, "PAID"));
+
+		// when
+		ResultActions response = mockMvc.perform(post("/api/orders")
+				.header("Idempotency-Key", idempotencyKey)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"userId\":1,\"menuId\":1,\"quantity\":1}"));
+
+		// then
+		response.andExpect(status().isCreated());
+	}
+
+	@Test
 	void 길이가_101자인_멱등성_키는_서비스에_전달하지_않고_400_실패_공통_응답을_반환한다() throws Exception {
 		// given
 		String idempotencyKey = "a".repeat(101);

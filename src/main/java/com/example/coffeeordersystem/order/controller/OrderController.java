@@ -39,7 +39,7 @@ public class OrderController {
 	}
 
 	private void validateIdempotencyKeyLength(String idempotencyKey) {
-		if (idempotencyKey != null && idempotencyKey.length() > IDEMPOTENCY_KEY_MAX_LENGTH) {
+		if (idempotencyKey != null && idempotencyKey.codePointCount(0, idempotencyKey.length()) > IDEMPOTENCY_KEY_MAX_LENGTH) {
 			throw new BusinessException(ErrorCode.IDEMPOTENCY_KEY_TOO_LONG);
 		}
 	}
