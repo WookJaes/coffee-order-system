@@ -389,7 +389,7 @@ GET /api/menus
 POST /api/points/charge
 ```
 
-로컬 실행 시 Flyway V3가 Postman 검증용 사용자(`userId: 1`)를 등록한다.
+`local` 프로필은 로컬 전용 Flyway V3 migration으로 Postman 검증용 사용자(`userId: 1`)를 등록한다. 공통 migration은 스키마와 메뉴 기준 데이터만 포함하므로 로컬이 아닌 환경에는 이 사용자가 새로 생성되지 않는다. 이전에 V3가 적용된 로컬이 아닌 DB는 V3 하나만 missing legacy migration으로 허용해 migrate하며, 기존 사용자 row를 삭제하거나 변경하지 않는다. 다른 versioned migration 누락은 오류로 처리한다.
 
 요청:
 
@@ -629,6 +629,8 @@ K6를 사용하여 주요 API의 부하를 검증한다.
 docker compose up -d
 SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 ```
+
+`local` 프로필은 공통 migration(V1/V2/V4/V5)과 로컬 전용 V3를 함께 적용해 Manual HTTP/Postman 예시의 `userId=1`을 준비한다. 로컬이 아닌 배포 프로필은 공통 migration만 적용하므로, 배포 자동화나 운영 검증에서 `userId=1`을 전제하지 않는다.
 
 기동 확인:
 

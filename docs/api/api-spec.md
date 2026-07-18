@@ -47,7 +47,7 @@ Base path: `/api`
 
 `amount`는 1 이상 100,000 이하여야 한다.
 
-로컬 Postman 검증용으로 Flyway V3가 `userId=1`의 테스트 사용자를 사전 등록한다.
+`local` 프로필에서만 로컬 전용 Flyway V3가 Postman 검증용 `userId=1`의 테스트 사용자를 사전 등록한다. 로컬이 아닌 환경의 공통 migration은 이 사용자를 생성하지 않는다. 요청·응답 계약은 변하지 않는다.
 
 ```json
 {"userId": 1, "amount": 10000}

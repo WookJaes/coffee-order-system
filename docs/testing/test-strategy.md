@@ -28,6 +28,10 @@
 - Kafka 중복 메시지, Redis 갱신 실패 후 DLT 이동
 - Redis Lua 집계의 날짜별 키·TTL·메뉴 주문 수 증가와 같은 `eventId`의 중복 무증가, 자정 경계·지연 소비에도 이벤트 주문 시각의 Asia/Seoul 날짜 키 선택. `orderedAt`이 없는 이전 Kafka 메시지는 주문 원장으로 시각을 보완한다.
 - Testcontainers Redis에서 실제 Lua 실행으로 중복 이벤트의 ZSET 점수 무증가와 마커·랭킹 키 TTL 검증. Docker daemon이 없으면 이 테스트는 skip하며, Docker 사용 환경에서는 JUnit 결과의 `skipped=0`을 확인한다.
+- 신규 로컬 MySQL DB는 공통 V1/V2/V4/V5와 로컬 전용 V3를 적용해 메뉴 5건과 `users.id=1` 테스트 사용자를 준비한다.
+- 신규 로컬이 아닌 MySQL DB는 공통 V1/V2/V4/V5만 적용해 메뉴 5건을 준비하고 `users.id=1` 테스트 사용자를 생성하지 않는다.
+- 기존 V3 이력이 있는 로컬이 아닌 MySQL DB는 V3 하나만 missing legacy migration으로 허용하는 전략에서 Flyway `migrate`가 checksum·누락 migration 오류 없이 동작하며, 기존 사용자 row를 삭제하지 않는다. V3 외 누락된 versioned migration은 실패해야 한다.
+- 환경별 seed 변경 뒤 포인트 충전·주문 API의 기존 controller/service 회귀 테스트를 실행한다.
 - classpath Lua 리소스 로드와 집계 서비스의 스크립트 주입
 - 임베디드 Kafka에서 일반 Redis 실패 시 최초 처리 1회와 재시도 2회(총 3회) 뒤 DLT 이동, 재구성 잠금 예외는 같은 재시도 예산을 넘어도 잠금 해제 뒤 처리, 성공 전 offset 미커밋(RECORD ack), 파티션 수와 Consumer 동시성 정합성
 - 최근 7일 Top 3, 동점 정렬, DB 재구성 쿼리

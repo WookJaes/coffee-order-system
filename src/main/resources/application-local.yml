@@ -17,7 +17,7 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    locations: classpath:db/migration,classpath:db/local-migration
   data:
     redis:
       host: ${REDIS_HOST}
