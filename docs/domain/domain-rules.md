@@ -19,7 +19,7 @@
 
 - 공통 Flyway migration은 모든 환경에 적용 가능한 스키마와 운영용 메뉴 기준 데이터만 포함한다.
 - `users.id=1` 테스트 사용자는 `local` 프로필의 로컬 전용 migration에서만 생성·갱신한다. 비로컬 환경은 이 사용자를 새로 만들지 않는다.
-- 기존에 V3가 적용된 비로컬 DB는 missing legacy migration으로 검증·이관하며, 이 전환은 기존 테스트 사용자 row를 삭제하거나 정리하지 않는다.
+- 기존에 V3가 적용된 비로컬 DB는 V3 하나만 missing legacy migration으로 검증·이관하며, 이 전환은 기존 테스트 사용자 row를 삭제하거나 정리하지 않는다. 다른 versioned migration 누락은 오류로 처리한다.
 
 ## 주문
 
