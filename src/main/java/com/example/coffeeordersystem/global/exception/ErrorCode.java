@@ -17,6 +17,7 @@ public enum ErrorCode {
 	MENU_NOT_ON_SALE(HttpStatus.BAD_REQUEST, "판매 중인 메뉴가 아닙니다."),
 	POINT_NOT_FOUND(HttpStatus.NOT_FOUND, "포인트 정보를 찾을 수 없습니다."),
 	IDEMPOTENCY_KEY_REQUIRED(HttpStatus.BAD_REQUEST, "Idempotency-Key 헤더는 필수입니다."),
+	IDEMPOTENCY_KEY_TOO_LONG(HttpStatus.BAD_REQUEST, "Idempotency-Key 헤더는 100자 이하여야 합니다."),
 	IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "동일한 멱등성 키로 다른 메뉴를 주문할 수 없습니다."),
 
 	INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다.");

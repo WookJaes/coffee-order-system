@@ -2,6 +2,8 @@ package com.example.coffeeordersystem.global.exception;
 
 import com.example.coffeeordersystem.global.response.ErrorResponse;
 
+import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -10,11 +12,16 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
 	private static final String INVALID_REQUEST_BODY_MESSAGE = "요청 본문 형식이 올바르지 않습니다.";
+	private static final String METHOD_NOT_ALLOWED_MESSAGE = "지원하지 않는 HTTP 메서드입니다.";
+	private static final String UNSUPPORTED_MEDIA_TYPE_MESSAGE = "지원하지 않는 Content-Type입니다.";
 
 	@ExceptionHandler(BusinessException.class)
 	public ResponseEntity<ErrorResponse> handleBusinessException(BusinessException exception) {
@@ -72,8 +79,23 @@ public class GlobalExceptionHandler {
 		return false;
 	}
 
+	@ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+	public ResponseEntity<ErrorResponse> handleHttpRequestMethodNotSupportedException(
+		HttpRequestMethodNotSupportedException exception
+	) {
+		return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+			.body(ErrorResponse.of(HttpStatus.METHOD_NOT_ALLOWED, METHOD_NOT_ALLOWED_MESSAGE));
+	}
+
+	@ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+	public ResponseEntity<ErrorResponse> handleHttpMediaTypeNotSupportedException(HttpMediaTypeNotSupportedException exception) {
+		return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+			.body(ErrorResponse.of(HttpStatus.UNSUPPORTED_MEDIA_TYPE, UNSUPPORTED_MEDIA_TYPE_MESSAGE));
+	}
+
 	@ExceptionHandler(Exception.class)
-	public ResponseEntity<ErrorResponse> handleException() {
+	public ResponseEntity<ErrorResponse> handleException(Exception exception) {
+		log.error("Unexpected exception occurred", exception);
 		ErrorCode errorCode = ErrorCode.INTERNAL_SERVER_ERROR;
 		return ResponseEntity.status(errorCode.getStatus())
 			.body(ErrorResponse.of(errorCode.getStatus(), errorCode.getMessage()));
