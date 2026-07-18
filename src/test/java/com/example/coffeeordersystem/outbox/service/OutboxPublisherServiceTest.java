@@ -38,6 +38,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -276,6 +277,55 @@ class OutboxPublisherServiceTest {
 		// then
 		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
 		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+	}
+
+	@Test
+	void 앞선_Kafka_전송이_처리_제한_시간을_넘어도_같은_배치의_대기_이벤트는_다른_Publisher가_재선점하지_않는다() throws Exception {
+		// given
+		EventFixture firstEvent = createOrderEvent("waiting-lease-first");
+		EventFixture waitingEvent = createOrderEvent("waiting-lease-second");
+		CountDownLatch firstSendStarted = new CountDownLatch(1);
+		CountDownLatch releaseFirstSend = new CountDownLatch(1);
+		CountDownLatch waitingEventSent = new CountDownLatch(1);
+		doAnswer(invocation -> {
+			OrderPaidEvent sentEvent = invocation.getArgument(2, OrderPaidEvent.class);
+			if (sentEvent.eventId().equals(firstEvent.eventId())) {
+				firstSendStarted.countDown();
+				try {
+					releaseFirstSend.await();
+				} catch (InterruptedException exception) {
+					Thread.currentThread().interrupt();
+				}
+			}
+			if (sentEvent.eventId().equals(waitingEvent.eventId())) {
+				waitingEventSent.countDown();
+			}
+			return CompletableFuture.completedFuture(null);
+		}).when(kafkaTemplate).send(eq(properties.topic()), anyString(), any(OrderPaidEvent.class));
+
+		// when
+		ExecutorService executor = Executors.newFixedThreadPool(2);
+		Future<?> firstPublisher = executor.submit(outboxPublisherService::publishPendingEvents);
+		firstSendStarted.await();
+		Thread.sleep(properties.processingTimeout().plusMillis(500).toMillis());
+		Future<?> secondPublisher = executor.submit(outboxPublisherService::publishPendingEvents);
+		secondPublisher.get();
+
+		// then
+		assertThat(waitingEventSent.await(200, TimeUnit.MILLISECONDS)).isFalse();
+		assertThat(orderEventRepository.findById(waitingEvent.eventId()).orElseThrow().getStatus())
+			.isEqualTo(OrderEventStatus.PROCESSING);
+
+		// when
+		releaseFirstSend.countDown();
+		firstPublisher.get();
+		executor.shutdown();
+
+		// then
+		assertThat(orderEventRepository.findById(firstEvent.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
+		assertThat(orderEventRepository.findById(waitingEvent.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
+		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(firstEvent.orderId().toString()), any(OrderPaidEvent.class));
+		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(waitingEvent.orderId().toString()), any(OrderPaidEvent.class));
 	}
 
 	@Test
