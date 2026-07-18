@@ -4,7 +4,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.mockito.BDDMockito.willThrow;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -17,14 +19,18 @@ import com.example.coffeeordersystem.order.service.OrderService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.data.jpa.mapping.JpaMetamodelMappingContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 @WebMvcTest(OrderController.class)
+@ExtendWith(OutputCaptureExtension.class)
 class OrderControllerTest {
 
 	@Autowired
@@ -58,6 +64,43 @@ class OrderControllerTest {
 			.andExpect(jsonPath("$.data.paymentAmount").value(9_000))
 			.andExpect(jsonPath("$.data.remainingPoint").value(1_000))
 			.andExpect(jsonPath("$.data.status").value("PAID"));
+	}
+
+	@Test
+	void 길이가_100자인_멱등성_키는_기존_주문_흐름에서_허용한다() throws Exception {
+		// given
+		String idempotencyKey = "a".repeat(100);
+		given(orderService.create(any(), eq(idempotencyKey)))
+			.willReturn(new OrderCreateResponse(1L, 1L, 1L, 1, 4_500, 5_500, "PAID"));
+
+		// when
+		ResultActions response = mockMvc.perform(post("/api/orders")
+				.header("Idempotency-Key", idempotencyKey)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"userId\":1,\"menuId\":1,\"quantity\":1}"));
+
+		// then
+		response.andExpect(status().isCreated());
+	}
+
+	@Test
+	void 길이가_101자인_멱등성_키는_서비스에_전달하지_않고_400_실패_공통_응답을_반환한다() throws Exception {
+		// given
+		String idempotencyKey = "a".repeat(101);
+
+		// when
+		ResultActions response = mockMvc.perform(post("/api/orders")
+				.header("Idempotency-Key", idempotencyKey)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"userId\":1,\"menuId\":1,\"quantity\":1}"));
+
+		// then
+		response
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.status").value(HttpStatus.BAD_REQUEST.value()))
+			.andExpect(jsonPath("$.message").value("Idempotency-Key 헤더는 100자 이하여야 합니다."))
+			.andExpect(jsonPath("$.data").doesNotExist());
+		then(orderService).shouldHaveNoInteractions();
 	}
 
 	@Test
@@ -126,5 +169,60 @@ class OrderControllerTest {
 			.andExpect(jsonPath("$.status").value(HttpStatus.CONFLICT.value()))
 			.andExpect(jsonPath("$.message").value("동일한 멱등성 키로 다른 메뉴를 주문할 수 없습니다."))
 			.andExpect(jsonPath("$.data").doesNotExist());
+	}
+
+	@Test
+	void 지원하지_않는_HTTP_메서드는_405_실패_공통_응답을_반환한다() throws Exception {
+		// given
+
+		// when
+		ResultActions response = mockMvc.perform(get("/api/orders"));
+
+		// then
+		response
+			.andExpect(status().isMethodNotAllowed())
+			.andExpect(jsonPath("$.status").value(HttpStatus.METHOD_NOT_ALLOWED.value()))
+			.andExpect(jsonPath("$.message").value("지원하지 않는 HTTP 메서드입니다."))
+			.andExpect(jsonPath("$.data").doesNotExist());
+	}
+
+	@Test
+	void 지원하지_않는_Content_Type은_415_실패_공통_응답을_반환한다() throws Exception {
+		// given
+
+		// when
+		ResultActions response = mockMvc.perform(post("/api/orders")
+				.header("Idempotency-Key", "order-key")
+				.contentType(MediaType.TEXT_PLAIN)
+				.content("not-json"));
+
+		// then
+		response
+			.andExpect(status().isUnsupportedMediaType())
+			.andExpect(jsonPath("$.status").value(HttpStatus.UNSUPPORTED_MEDIA_TYPE.value()))
+			.andExpect(jsonPath("$.message").value("지원하지 않는 Content-Type입니다."))
+			.andExpect(jsonPath("$.data").doesNotExist());
+	}
+
+	@Test
+	void 예상하지_못한_예외는_내부_메시지_없이_500_실패_공통_응답과_ERROR_로그를_남긴다(CapturedOutput output) throws Exception {
+		// given
+		willThrow(new IllegalStateException("internal exception detail"))
+			.given(orderService).create(any(), eq("order-key"));
+
+		// when
+		ResultActions response = mockMvc.perform(post("/api/orders")
+				.header("Idempotency-Key", "order-key")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"userId\":1,\"menuId\":1,\"quantity\":1}"));
+
+		// then
+		response
+			.andExpect(status().isInternalServerError())
+			.andExpect(jsonPath("$.status").value(HttpStatus.INTERNAL_SERVER_ERROR.value()))
+			.andExpect(jsonPath("$.message").value("서버 오류가 발생했습니다."))
+			.andExpect(jsonPath("$.data").doesNotExist())
+			.andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("internal exception detail"))));
+		org.assertj.core.api.Assertions.assertThat(output).contains("internal exception detail");
 	}
 }
