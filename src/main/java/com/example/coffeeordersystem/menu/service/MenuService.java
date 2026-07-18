@@ -17,6 +17,7 @@ import java.util.function.Function;
 import lombok.RequiredArgsConstructor;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -33,6 +34,7 @@ public class MenuService {
 			.toList();
 	}
 
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public List<PopularMenuResponse> getPopularMenus() {
 		List<PopularMenuRanking> rankings = popularMenuRankingService.getPopularMenuRankings();
 		Map<Long, Menu> activeMenusById = menuRepository
