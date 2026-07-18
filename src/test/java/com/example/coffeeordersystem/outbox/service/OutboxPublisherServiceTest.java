@@ -351,20 +351,25 @@ class OutboxPublisherServiceTest {
 		// when
 		ExecutorService executor = Executors.newFixedThreadPool(2);
 		Future<?> firstPublisher = executor.submit(outboxPublisherService::publishPendingEvents);
-		firstSendReturned.await();
+		assertThat(firstSendReturned.await(1, TimeUnit.SECONDS)).isTrue();
+		String originalToken = orderEventRepository.findById(waitingEvent.eventId()).orElseThrow().getProcessingToken();
 		Thread.sleep(properties.processingTimeout().plusMillis(500).toMillis());
 		Future<?> secondPublisher = executor.submit(outboxPublisherService::publishPendingEvents);
-		secondPublisher.get();
 
 		// then
-		assertThat(waitingEventSent.await(200, TimeUnit.MILLISECONDS)).isFalse();
-		assertThat(orderEventRepository.findById(waitingEvent.eventId()).orElseThrow().getStatus())
-			.isEqualTo(OrderEventStatus.PROCESSING);
+		try {
+			secondPublisher.get(1, TimeUnit.SECONDS);
+			OrderEvent waitingEventAfterSecondPublisher = orderEventRepository.findById(waitingEvent.eventId()).orElseThrow();
+			assertThat(waitingEventAfterSecondPublisher.getStatus()).isEqualTo(OrderEventStatus.PROCESSING);
+			assertThat(waitingEventAfterSecondPublisher.getProcessingToken()).isEqualTo(originalToken);
+			assertThat(waitingEventSent.await(200, TimeUnit.MILLISECONDS)).isFalse();
+		} finally {
+			delayedSendResult.complete(null);
+			executor.shutdown();
+		}
 
 		// when
-		delayedSendResult.complete(null);
-		firstPublisher.get();
-		executor.shutdown();
+		firstPublisher.get(1, TimeUnit.SECONDS);
 
 		// then
 		assertThat(orderEventRepository.findById(firstEvent.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
