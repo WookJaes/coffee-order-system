@@ -104,7 +104,7 @@ public class OutboxPublisherService {
 					sendTask.cancel(false);
 					throw new IllegalStateException("Outbox Kafka send 작업이 시작되지 않았습니다.");
 				}
-				if (!outboxEventClaimService.renewProcessingLease(eventId, token)) {
+				if (!outboxEventClaimService.renewProcessingLeases(token)) {
 					log.warn("Outbox event processing lease lost. eventId={}", eventId);
 					return null;
 				}
@@ -130,7 +130,7 @@ public class OutboxPublisherService {
 				sendResult.get(renewalIntervalMillis, TimeUnit.MILLISECONDS);
 				return true;
 			} catch (TimeoutException exception) {
-				if (!outboxEventClaimService.renewProcessingLease(eventId, token)) {
+				if (!outboxEventClaimService.renewProcessingLeases(token)) {
 					log.warn("Outbox event processing lease lost. eventId={}", eventId);
 					return false;
 				}

@@ -56,15 +56,10 @@ public interface OrderEventRepository extends JpaRepository<OrderEvent, Long> {
 	@Query("""
 		update OrderEvent e
 		set e.processingStartedAt = :now
-		where e.id = :eventId
-		  and e.status = 'PROCESSING'
+		where e.status = 'PROCESSING'
 		  and e.processingToken = :token
 		""")
-	int renewProcessingLease(
-		@Param("eventId") Long eventId,
-		@Param("token") String token,
-		@Param("now") LocalDateTime now
-	);
+	int renewProcessingLeases(@Param("token") String token, @Param("now") LocalDateTime now);
 
 	List<OrderEvent> findByProcessingTokenOrderById(String processingToken);
 

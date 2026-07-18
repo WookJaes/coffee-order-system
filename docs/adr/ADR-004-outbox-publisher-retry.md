@@ -10,7 +10,7 @@ Issue #6은 주문 트랜잭션에서 저장된 `order_events`를 `order-paid` K
 
 ## 결정
 
-별도 Outbox Publisher가 주기적으로 발행 대상을 조회한다. 후보 조회 뒤 `WHERE id = ? AND status = PENDING` 조건부 DB 갱신으로 `PENDING -> PROCESSING` 선점을 원자적으로 저장한 뒤 Kafka 발행을 수행한다. 선점 토큰을 저장해 같은 실행이 선점한 이벤트만 완료 처리한다.
+별도 Outbox Publisher가 주기적으로 발행 대상을 조회한다. 후보 조회 뒤 `WHERE id = ? AND status = PENDING` 조건부 DB 갱신으로 `PENDING -> PROCESSING` 선점을 원자적으로 저장한 뒤 Kafka 발행을 수행한다. 선점 토큰을 저장해 같은 실행이 선점한 이벤트만 완료 처리한다. 배치를 순차 발행할 때 활성 Kafka 전송이 처리 제한 시간을 넘으면, 같은 선점 토큰의 `PROCESSING` 배치 전체 lease를 갱신한다.
 
 발행 성공 시 `SENT`로, 실패 시 실패 횟수를 증가시킨다. 초기 발행 실패 뒤 최대 재시도 횟수를 초과하면 `FAILED`, 남아 있으면 `PENDING`으로 되돌리고 다음 시도 시각을 늦춘다. 기본 최대 재시도 횟수는 3회이므로 총 네 번째 실패에서 `FAILED`다. 따라서 Issue #6 구현에는 `PROCESSING`, 선점 시각·토큰, 재시도 시각, 실패 사유를 저장할 스키마 확장이 포함된다.
 
@@ -30,19 +30,19 @@ Issue #6은 주문 트랜잭션에서 저장된 `order_events`를 `order-paid` K
 
 ## 결과 (트레이드오프)
 
-`PROCESSING` 상태에서 프로세스가 중단될 수 있으므로 Publisher는 lease 갱신이 멈춘 이벤트를 다시 `PENDING`으로 복구하는 정책을 가져야 한다. Kafka는 at-least-once 전송이므로 Consumer는 중복을 처리해야 하며, 이 결정은 ADR-005와 함께 적용한다. Kafka 발행이 `processingTimeout`보다 오래 걸릴 수 있으므로, 발행을 진행 중인 유효한 선점은 같은 토큰 조건으로 lease 시각을 갱신한다.
+`PROCESSING` 상태에서 프로세스가 중단될 수 있으므로 Publisher는 lease 갱신이 멈춘 이벤트를 다시 `PENDING`으로 복구하는 정책을 가져야 한다. Kafka는 at-least-once 전송이므로 Consumer는 중복을 처리해야 하며, 이 결정은 ADR-005와 함께 적용한다. Kafka 발행이 `processingTimeout`보다 오래 걸릴 수 있으므로, 발행을 진행 중인 유효한 선점은 같은 토큰 조건으로 배치 전체 lease 시각을 갱신한다. Publisher 또는 갱신이 멈추면 그 토큰의 이벤트 모두 기존 stale recovery cutoff를 지나 회복 대상이 된다.
 
 ### 구현 내용
 
 - `OutboxEventClaimService`는 짧은 `REQUIRES_NEW` 트랜잭션에서 오래된 `PROCESSING`을 복구하고 조건부 갱신으로 선점한다.
-- `OutboxPublisherService`는 트랜잭션 밖에서 `KafkaTemplate.send()` 호출을 별도 Future로 실행하고 메시지 키로 `orderId`를 사용한다. 호출과 완료를 기다리는 전 기간 `processingTimeout`의 1/3 주기로 같은 이벤트 ID·선점 토큰의 lease 시각을 조건부 갱신하며, 갱신 또는 완료 시점 토큰 검증이 거절되면 상태를 변경하지 않는다. `processingTimeout`은 lease 갱신 여유를 위해 최소 1초다. `OrderPaidEvent`에는 연결된 주문의 실제 `orderedAt`도 담아 Consumer가 지연 소비 시에도 주문일 랭킹 키를 선택할 수 있게 한다.
+- `OutboxPublisherService`는 트랜잭션 밖에서 `KafkaTemplate.send()` 호출을 별도 Future로 실행하고 메시지 키로 `orderId`를 사용한다. 호출과 완료를 기다리는 전 기간 `processingTimeout`의 1/3 주기로 같은 선점 토큰의 모든 `PROCESSING` 배치 이벤트 lease 시각을 조건부 갱신하며, 갱신 또는 완료 시점 토큰 검증이 거절되면 상태를 변경하지 않는다. `processingTimeout`은 lease 갱신 여유를 위해 최소 1초다. `OrderPaidEvent`에는 연결된 주문의 실제 `orderedAt`도 담아 Consumer가 지연 소비 시에도 주문일 랭킹 키를 선택할 수 있게 한다.
 - Kafka send는 대기열 없는 단일 Spring 관리 executor에서 실행한다. executor 거절 또는 처리 제한 시간 안에 시작되지 않은 작업은 취소하고 기존 실패·backoff 경로로 전환하므로, 시작되지 않은 작업이 lease만 무기한 갱신하는 zombie claim을 만들지 않는다.
 - `OutboxEventCompletionService`는 짧은 비관적 잠금 트랜잭션에서 선점 토큰을 재확인한 후 `SENT` 또는 Kafka 발행 실패 상태를 기록한다. Kafka 발행이 성공한 뒤 `SENT` 기록 트랜잭션만 실패하면 Publisher는 이를 Kafka 발행 실패로 취급하지 않아 retry count·backoff·`FAILED`를 변경하지 않는다. 이때 이벤트는 기존 `PROCESSING`·토큰으로 남고 lease 갱신이 멈춘 뒤 stale recovery가 `PENDING`으로 회복해 재발행할 수 있다. 이는 DB/Kafka 원자성을 만들지 않는 대신, Consumer `eventId` 멱등성을 전제로 at-least-once 전달을 보존한다.
 - `outbox.publisher.*` 설정으로 토픽, 주기, 배치 크기, 최대 실패 횟수, backoff, 처리 제한 시간을 조정한다.
 
 ## 검증 계획
 
-- Kafka 발행이 처리 제한 시간을 넘는 동안에도 여러 Publisher 실행 시 한 Outbox 이벤트의 lease·선점·상태 전이가 일관적인지 확인한다.
+- Kafka 발행이 처리 제한 시간을 넘는 동안에도 여러 Publisher 실행 시 현재 이벤트와 같은 배치의 대기 이벤트 lease·선점·상태 전이가 일관적인지 확인한다.
 - lease 갱신이 멈춘 `PROCESSING` 이벤트를 다음 Publisher가 회복하는지 확인한다.
 - Kafka 발행 실패 후 재시도·최종 실패 상태와 시도 횟수를 확인한다.
 - Kafka 발행 성공 뒤 `SENT` DB 기록 실패가 Kafka 실패 상태로 덮어써지지 않고, stale recovery 뒤 재발행되는지 확인한다.

@@ -46,8 +46,8 @@ public class OutboxEventClaimService {
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
-	public boolean renewProcessingLease(Long eventId, String token) {
-		return orderEventRepository.renewProcessingLease(eventId, token, LocalDateTime.now()) == 1;
+	public boolean renewProcessingLeases(String token) {
+		return orderEventRepository.renewProcessingLeases(token, LocalDateTime.now()) > 0;
 	}
 
 	private OrderPaidEvent toMessage(OrderEvent event) {
