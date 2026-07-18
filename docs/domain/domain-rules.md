@@ -9,6 +9,7 @@
 ## 포인트
 
 - 충전 금액은 1 이상 100,000 이하다.
+- 충전 후 잔액은 `Integer.MAX_VALUE`(2,147,483,647)를 초과할 수 없다. 초과 충전은 `POINT_BALANCE_OVERFLOW`로 거절하며 잔액과 `CHARGE` 이력을 변경하지 않는다.
 - 현재 잔액은 음수가 될 수 없다.
 - 충전 시 `points` row가 없으면 생성한다.
 - 주문 시 `points` row가 없으면 `POINT_NOT_FOUND`로 실패한다.

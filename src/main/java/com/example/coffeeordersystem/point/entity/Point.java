@@ -41,6 +41,9 @@ public class Point extends BaseEntity {
 	}
 
 	public void charge(Integer amount) {
+		if (balance > Integer.MAX_VALUE - amount) {
+			throw new BusinessException(ErrorCode.POINT_BALANCE_OVERFLOW);
+		}
 		balance += amount;
 	}
 

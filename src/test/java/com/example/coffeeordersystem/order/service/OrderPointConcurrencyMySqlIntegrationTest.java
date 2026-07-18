@@ -3,6 +3,7 @@ package com.example.coffeeordersystem.order.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.coffeeordersystem.global.exception.BusinessException;
+import com.example.coffeeordersystem.global.exception.ErrorCode;
 import com.example.coffeeordersystem.menu.entity.Menu;
 import com.example.coffeeordersystem.menu.entity.MenuStatus;
 import com.example.coffeeordersystem.menu.repository.MenuRepository;
@@ -133,6 +134,29 @@ class OrderPointConcurrencyMySqlIntegrationTest {
 		assertThat(pointHistoryRepository.findAll().stream()
 			.filter(history -> history.getType() == PointHistoryType.USE)).hasSize(5);
 		assertThat(orderEventRepository.count()).isEqualTo(5);
+	}
+
+	@Test
+	void 실제_MySQL에서_최대_잔액_근처_동시_충전은_초과_충전을_거절하고_이력을_보존한다() throws Exception {
+		// given
+		User user = userRepository.saveAndFlush(new User("mysql 오버플로 사용자"));
+		pointRepository.saveAndFlush(new Point(user, Integer.MAX_VALUE - 100_000));
+
+		// when
+		List<Throwable> failures = runConcurrently(2, ignored ->
+			pointService.charge(new PointChargeRequest(user.getId(), 100_000))
+		);
+
+		// then
+		assertThat(failures).singleElement().isInstanceOf(BusinessException.class);
+		assertThat(((BusinessException)failures.get(0)).getErrorCode()).isEqualTo(ErrorCode.POINT_BALANCE_OVERFLOW);
+		assertThat(pointRepository.findByUserId(user.getId()).orElseThrow().getBalance()).isEqualTo(Integer.MAX_VALUE);
+		assertThat(pointHistoryRepository.findAll()).singleElement()
+			.satisfies(history -> {
+				assertThat(history.getType()).isEqualTo(PointHistoryType.CHARGE);
+				assertThat(history.getAmount()).isEqualTo(100_000);
+				assertThat(history.getBalanceAfter()).isEqualTo(Integer.MAX_VALUE);
+			});
 	}
 
 	@Test
