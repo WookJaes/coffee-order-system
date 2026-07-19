@@ -1,7 +1,7 @@
 package com.example.coffeeordersystem.ranking.service;
 
-import com.example.coffeeordersystem.order.repository.OrderRepository;
 import com.example.coffeeordersystem.order.repository.OrderEventRepository;
+import com.example.coffeeordersystem.order.repository.OrderRepository;
 import com.example.coffeeordersystem.ranking.dto.DailyMenuOrderCount;
 import com.example.coffeeordersystem.ranking.dto.PopularMenuRanking;
 import com.example.coffeeordersystem.ranking.dto.RebuildOrderEvent;
@@ -11,11 +11,11 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -23,7 +23,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
@@ -32,6 +31,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class PopularMenuRankingService {
 
 	private static final int RANKING_DAYS = 7;
+	private static final String DATA_STATUS = "DATA";
+	private static final String EMPTY_STATUS = "EMPTY";
+	private static final String OWNERSHIP_LOST_MESSAGE = "랭킹 Redis 재구성 잠금 소유권을 잃었습니다.";
 
 	private final StringRedisTemplate redisTemplate;
 	private final OrderRepository orderRepository;
@@ -44,6 +46,7 @@ public class PopularMenuRankingService {
 	private final RedisScript<Long> cleanupRebuildMarkerScript;
 	private final RedisScript<Long> cleanupRebuildScript;
 	private final RedisScript<Long> rebuildWriteScript;
+	private final RedisScript<String> readSnapshotScript;
 	private final ScheduledExecutorService leaseScheduler;
 	private final Clock clock;
 
@@ -59,6 +62,7 @@ public class PopularMenuRankingService {
 		RedisScript<Long> cleanupRebuildMarkerScript,
 		RedisScript<Long> cleanupRebuildScript,
 		RedisScript<Long> rebuildWriteScript,
+		RedisScript<String> readSnapshotScript,
 		ScheduledExecutorService leaseScheduler,
 		Clock clock
 	) {
@@ -73,6 +77,7 @@ public class PopularMenuRankingService {
 		this.cleanupRebuildMarkerScript = cleanupRebuildMarkerScript;
 		this.cleanupRebuildScript = cleanupRebuildScript;
 		this.rebuildWriteScript = rebuildWriteScript;
+		this.readSnapshotScript = readSnapshotScript;
 		this.leaseScheduler = leaseScheduler;
 		this.clock = clock;
 	}
@@ -80,56 +85,105 @@ public class PopularMenuRankingService {
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ, propagation = Propagation.REQUIRES_NEW)
 	public List<PopularMenuRanking> getPopularMenuRankings() {
 		LocalDate today = LocalDate.now(clock);
-		Map<Long, Long> orderCounts = readRedisRankings(today);
-		if (!isRankingComplete(today)) {
-			orderCounts = recoverRankings(today);
-		}
-		return toTopRankings(orderCounts);
-	}
-
-	private Map<Long, Long> readRedisRankings(LocalDate today) {
-		Map<Long, Long> orderCounts = new HashMap<>();
-		ZSetOperations<String, String> zSetOperations = redisTemplate.opsForZSet();
-		for (int offset = 0; offset < RANKING_DAYS; offset++) {
-			Set<ZSetOperations.TypedTuple<String>> tuples = zSetOperations.rangeWithScores(
-				RedisRankingKey.dailyRanking(today.minusDays(offset)), 0, -1
-			);
-			if (tuples == null) {
-				continue;
-			}
-			for (ZSetOperations.TypedTuple<String> tuple : tuples) {
-				if (tuple.getValue() != null && tuple.getScore() != null) {
-					orderCounts.merge(Long.parseLong(tuple.getValue()), tuple.getScore().longValue(), Long::sum);
-				}
-			}
-		}
-		return orderCounts;
-	}
-
-	private Map<Long, Long> recoverRankings(LocalDate today) {
 		LocalDateTime start = today.minusDays(RANKING_DAYS - 1L).atStartOfDay();
 		LocalDateTime end = today.plusDays(1).atStartOfDay();
-		String lockToken = UUID.randomUUID().toString();
+		RedisRankingSnapshot redisSnapshot = readRedisSnapshot(today);
+		LedgerSnapshot ledger = buildLedgerSnapshot(today, orderRepository.findDailyPaidMenuOrderCounts(start, end));
+		if (redisSnapshot.matches(today, ledger.dailyCounts())) {
+			return toTopRankings(redisSnapshot.orderCounts());
+		}
+		return toTopRankings(recoverRankings(today, start, end, ledger));
+	}
+
+	private LedgerSnapshot buildLedgerSnapshot(LocalDate today, List<DailyMenuOrderCount> dailyRows) {
+		Map<LocalDate, Long> dailyCounts = new HashMap<>();
 		Map<Long, Long> totals = new HashMap<>();
+		for (int offset = 0; offset < RANKING_DAYS; offset++) {
+			dailyCounts.put(today.minusDays(offset), 0L);
+		}
+		for (DailyMenuOrderCount dailyRow : dailyRows) {
+			LocalDate date = toLocalDate(dailyRow.orderedDate());
+			dailyCounts.merge(date, dailyRow.orderCount(), Long::sum);
+			totals.merge(dailyRow.menuId(), dailyRow.orderCount(), Long::sum);
+		}
+		return new LedgerSnapshot(dailyRows, dailyCounts, totals);
+	}
+
+	private RedisRankingSnapshot readRedisSnapshot(LocalDate today) {
+		List<String> keys = new ArrayList<>();
+		for (int offset = 0; offset < RANKING_DAYS; offset++) {
+			LocalDate date = today.minusDays(offset);
+			keys.add(RedisRankingKey.dailyRanking(date));
+			keys.add(RedisRankingKey.dailyStatus(date));
+			keys.add(RedisRankingKey.dailyProcessedOrderCount(date));
+		}
+		String encoded = redisTemplate.execute(readSnapshotScript, keys, new Object[0]);
+		if (encoded == null) {
+			throw new IllegalStateException("랭킹 Redis snapshot을 읽을 수 없습니다.");
+		}
+
+		String[] dailySnapshots = encoded.split(";", -1);
+		if (dailySnapshots.length != RANKING_DAYS) {
+			throw new IllegalStateException("랭킹 Redis snapshot 형식이 올바르지 않습니다.");
+		}
+		Map<LocalDate, RedisDailySnapshot> snapshots = new HashMap<>();
+		Map<Long, Long> orderCounts = new HashMap<>();
+		for (int offset = 0; offset < RANKING_DAYS; offset++) {
+			LocalDate date = today.minusDays(offset);
+			RedisDailySnapshot dailySnapshot = parseDailySnapshot(dailySnapshots[offset]);
+			snapshots.put(date, dailySnapshot);
+			dailySnapshot.orderCounts().forEach((menuId, count) -> orderCounts.merge(menuId, count, Long::sum));
+		}
+		return new RedisRankingSnapshot(snapshots, orderCounts);
+	}
+
+	private RedisDailySnapshot parseDailySnapshot(String encoded) {
+		String[] fields = encoded.split("\\|", -1);
+		if (fields.length != 4) {
+			throw new IllegalStateException("랭킹 Redis 일자 snapshot 형식이 올바르지 않습니다.");
+		}
+		Map<Long, Long> orderCounts = new HashMap<>();
+		if (!fields[3].isEmpty()) {
+			for (String entry : fields[3].split(",", -1)) {
+				String[] memberAndScore = entry.split("=", -1);
+				if (memberAndScore.length != 2) {
+					throw new IllegalStateException("랭킹 Redis ZSET snapshot 형식이 올바르지 않습니다.");
+				}
+				orderCounts.put(Long.parseLong(memberAndScore[0]), Double.valueOf(memberAndScore[1]).longValue());
+			}
+		}
+		Long processedCount = fields[1].isEmpty() ? null : Long.valueOf(fields[1]);
+		return new RedisDailySnapshot(
+			fields[0].isEmpty() ? null : fields[0],
+			processedCount,
+			"1".equals(fields[2]),
+			orderCounts
+		);
+	}
+
+	private Map<Long, Long> recoverRankings(
+		LocalDate today,
+		LocalDateTime start,
+		LocalDateTime end,
+		LedgerSnapshot ledger
+	) {
+		String lockToken = UUID.randomUUID().toString();
 		Boolean locked = redisTemplate.opsForValue().setIfAbsent(
 			RedisRankingKey.rebuilding(), lockToken, rebuildLockTtl
 		);
 		if (!Boolean.TRUE.equals(locked)) {
-			List<DailyMenuOrderCount> dailyCounts = orderRepository.findDailyPaidMenuOrderCounts(start, end);
-			for (DailyMenuOrderCount dailyCount : dailyCounts) {
-				totals.merge(dailyCount.menuId(), dailyCount.orderCount(), Long::sum);
-			}
-			return totals;
+			return ledger.totals();
 		}
-		List<String> restoredMarkerKeys = new java.util.ArrayList<>();
+
+		List<String> restoredMarkerKeys = new ArrayList<>();
 		AtomicBoolean ownershipLost = new AtomicBoolean(false);
 		ScheduledFuture<?> leaseRenewal = startLeaseRenewal(lockToken, ownershipLost);
 		try {
-			Map<Long, Long> currentRankings = readRedisRankings(today);
-			if (isRankingComplete(today)) {
-				return currentRankings;
+			RedisRankingSnapshot currentRankings = readRedisSnapshot(today);
+			if (currentRankings.matches(today, ledger.dailyCounts())) {
+				return currentRankings.orderCounts();
 			}
-			List<DailyMenuOrderCount> dailyCounts = orderRepository.findDailyPaidMenuOrderCounts(start, end);
+
 			assertLockOwnership(ownershipLost);
 			List<RebuildOrderEvent> events = orderEventRepository.findPaidEventsForRankingRebuild(start, end);
 			List<String> dailyKeys = dailyKeys(today);
@@ -142,54 +196,44 @@ public class PopularMenuRankingService {
 					restoredMarkerKeys.add(markerKey);
 				}
 			}
-			for (DailyMenuOrderCount dailyCount : dailyCounts) {
+			for (DailyMenuOrderCount dailyCount : ledger.dailyRows()) {
 				assertLockOwnership(ownershipLost);
 				String rankingKey = RedisRankingKey.dailyRanking(toLocalDate(dailyCount.orderedDate()));
 				writeRebuild(lockToken, List.of(RedisRankingKey.rebuilding(), rankingKey), "RANKING",
 					dailyCount.orderCount().toString(), dailyCount.menuId().toString());
-				totals.merge(dailyCount.menuId(), dailyCount.orderCount(), Long::sum);
 			}
 			for (int offset = 0; offset < RANKING_DAYS; offset++) {
 				assertLockOwnership(ownershipLost);
 				LocalDate date = today.minusDays(offset);
-				String status = totals.isEmpty() ? "EMPTY" : hasDailyCount(dailyCounts, date) ? "DATA" : "EMPTY";
+				Long dailyCount = ledger.dailyCounts().getOrDefault(date, 0L);
+				writeRebuild(lockToken, List.of(RedisRankingKey.rebuilding(), RedisRankingKey.dailyProcessedOrderCount(date)), "COUNT",
+					dailyCount.toString());
+				String status = dailyCount > 0L ? DATA_STATUS : EMPTY_STATUS;
 				writeRebuild(lockToken, List.of(RedisRankingKey.rebuilding(), RedisRankingKey.dailyStatus(date)), "STATUS", status);
 			}
 		} catch (RuntimeException exception) {
 			cleanupFailedRebuild(lockToken, today, restoredMarkerKeys);
-			throw exception;
+			if (!isOwnershipLost(exception)) {
+				throw exception;
+			}
+			return ledger.totals();
 		} finally {
 			leaseRenewal.cancel(false);
 			releaseRebuildLock(lockToken);
 		}
-		return totals;
+		return ledger.totals();
 	}
 
-	private boolean isRankingComplete(LocalDate today) {
-		for (int offset = 0; offset < RANKING_DAYS; offset++) {
-			LocalDate date = today.minusDays(offset);
-			String status = redisTemplate.opsForValue().get(RedisRankingKey.dailyStatus(date));
-			Boolean rankingKeyExists = redisTemplate.hasKey(RedisRankingKey.dailyRanking(date));
-			if ("DATA".equals(status) && Boolean.TRUE.equals(rankingKeyExists)) {
-				continue;
-			}
-			if ("EMPTY".equals(status) && !Boolean.TRUE.equals(rankingKeyExists)) {
-				continue;
-			}
-			return false;
-		}
-		return true;
-	}
-
-	private boolean hasDailyCount(List<DailyMenuOrderCount> dailyCounts, LocalDate date) {
-		return dailyCounts.stream().anyMatch(dailyCount -> toLocalDate(dailyCount.orderedDate()).equals(date));
+	private boolean isOwnershipLost(RuntimeException exception) {
+		return exception instanceof IllegalStateException && OWNERSHIP_LOST_MESSAGE.equals(exception.getMessage());
 	}
 
 	private List<String> dailyKeys(LocalDate today) {
-		List<String> keys = new java.util.ArrayList<>();
+		List<String> keys = new ArrayList<>();
 		for (int offset = 0; offset < RANKING_DAYS; offset++) {
 			LocalDate date = today.minusDays(offset);
 			keys.add(RedisRankingKey.dailyRanking(date));
+			keys.add(RedisRankingKey.dailyProcessedOrderCount(date));
 			keys.add(RedisRankingKey.dailyStatus(date));
 		}
 		return keys;
@@ -220,7 +264,7 @@ public class PopularMenuRankingService {
 
 	private void assertLockOwnership(AtomicBoolean ownershipLost) {
 		if (ownershipLost.get()) {
-			throw new IllegalStateException("랭킹 Redis 재구성 잠금 소유권을 잃었습니다.");
+			throw new IllegalStateException(OWNERSHIP_LOST_MESSAGE);
 		}
 	}
 
@@ -232,7 +276,7 @@ public class PopularMenuRankingService {
 		System.arraycopy(values, 0, arguments, 3, values.length);
 		Long result = redisTemplate.execute(rebuildWriteScript, keys, arguments);
 		if (Long.valueOf(-1L).equals(result)) {
-			throw new IllegalStateException("랭킹 Redis 재구성 잠금 소유권을 잃었습니다.");
+			throw new IllegalStateException(OWNERSHIP_LOST_MESSAGE);
 		}
 		return result;
 	}
@@ -249,7 +293,7 @@ public class PopularMenuRankingService {
 	}
 
 	private List<String> withLockKey(List<String> keys) {
-		List<String> keysWithLock = new java.util.ArrayList<>();
+		List<String> keysWithLock = new ArrayList<>();
 		keysWithLock.add(RedisRankingKey.rebuilding());
 		keysWithLock.addAll(keys);
 		return keysWithLock;
@@ -271,5 +315,48 @@ public class PopularMenuRankingService {
 				.thenComparing(Map.Entry.comparingByKey()))
 			.map(entry -> new PopularMenuRanking(entry.getKey(), entry.getValue()))
 			.toList();
+	}
+
+	private record LedgerSnapshot(
+		List<DailyMenuOrderCount> dailyRows,
+		Map<LocalDate, Long> dailyCounts,
+		Map<Long, Long> totals
+	) {
+	}
+
+	private record RedisRankingSnapshot(
+		Map<LocalDate, RedisDailySnapshot> dailySnapshots,
+		Map<Long, Long> orderCounts
+	) {
+
+		private boolean matches(LocalDate today, Map<LocalDate, Long> expectedDailyCounts) {
+			for (int offset = 0; offset < RANKING_DAYS; offset++) {
+				LocalDate date = today.minusDays(offset);
+				RedisDailySnapshot snapshot = dailySnapshots.get(date);
+				long expected = expectedDailyCounts.getOrDefault(date, 0L);
+				if (snapshot == null || snapshot.processedCount() == null || snapshot.processedCount() != expected) {
+					return false;
+				}
+				long zsetTotal = snapshot.orderCounts().values().stream().mapToLong(Long::longValue).sum();
+				if (zsetTotal != expected) {
+					return false;
+				}
+				if (expected > 0L && (!DATA_STATUS.equals(snapshot.status()) || !snapshot.rankingExists())) {
+					return false;
+				}
+				if (expected == 0L && (!EMPTY_STATUS.equals(snapshot.status()) || snapshot.rankingExists() || !snapshot.orderCounts().isEmpty())) {
+					return false;
+				}
+			}
+			return true;
+		}
+	}
+
+	private record RedisDailySnapshot(
+		String status,
+		Long processedCount,
+		boolean rankingExists,
+		Map<Long, Long> orderCounts
+	) {
 	}
 }

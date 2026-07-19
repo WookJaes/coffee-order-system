@@ -92,6 +92,14 @@ public class RankingRedisConfig {
 		return script;
 	}
 
+	@Bean
+	public RedisScript<String> rankingReadSnapshotScript() {
+		DefaultRedisScript<String> script = new DefaultRedisScript<>();
+		script.setLocation(new ClassPathResource("scripts/ranking-read-snapshot.lua"));
+		script.setResultType(String.class);
+		return script;
+	}
+
 	@Bean(destroyMethod = "shutdown")
 	public ScheduledExecutorService rankingRebuildLeaseScheduler() {
 		return Executors.newSingleThreadScheduledExecutor();
@@ -112,6 +120,7 @@ public class RankingRedisConfig {
 		@Qualifier("rankingCleanupRebuildMarkerScript") RedisScript<Long> rankingCleanupRebuildMarkerScript,
 		@Qualifier("rankingCleanupRebuildScript") RedisScript<Long> rankingCleanupRebuildScript,
 		@Qualifier("rankingRebuildWriteScript") RedisScript<Long> rankingRebuildWriteScript,
+		@Qualifier("rankingReadSnapshotScript") RedisScript<String> rankingReadSnapshotScript,
 		ScheduledExecutorService rankingRebuildLeaseScheduler,
 		Clock rankingClock
 	) {
@@ -127,6 +136,7 @@ public class RankingRedisConfig {
 			rankingCleanupRebuildMarkerScript,
 			rankingCleanupRebuildScript,
 			rankingRebuildWriteScript,
+			rankingReadSnapshotScript,
 			rankingRebuildLeaseScheduler,
 			rankingClock
 		);

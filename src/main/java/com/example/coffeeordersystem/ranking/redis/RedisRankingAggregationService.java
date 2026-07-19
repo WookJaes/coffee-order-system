@@ -39,6 +39,7 @@ public class RedisRankingAggregationService {
 			List.of(
 				RedisRankingKey.processedEvent(event.eventId()),
 				RedisRankingKey.dailyRanking(date),
+				RedisRankingKey.dailyProcessedOrderCount(date),
 				RedisRankingKey.rebuilding(),
 				RedisRankingKey.dailyStatus(date)
 			),
