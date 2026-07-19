@@ -129,7 +129,7 @@ Idempotency-Key: 4de91f71-4c2d-4eb9-bc8e-2b0f4603a1fb
 - 현재 `ACTIVE` 메뉴만 응답한다. Redis 또는 DB 랭킹에 남았지만 `SOLD_OUT` 또는 삭제된 메뉴는 제외하고 다음 `ACTIVE` 메뉴로 최대 3건까지 채운다.
 - 7개 일자의 Redis ZSET 점수·`DATA/EMPTY` 상태·일자별 처리 주문 건수는 하나의 원자적 snapshot으로 읽는다. Redis 처리 건수와 같은 기간 `orders`의 일자별 `PAID` 주문 건수가 모두 일치하고 완료 상태가 유효할 때만 Redis 합산 결과를 사용한다.
 - Redis snapshot이 비어 있거나, `DATA/EMPTY` 상태·ZSET·처리 건수가 불완전하거나 DB 원장 건수와 다르면 기존 재구성 잠금을 사용해 Redis를 복구한다. 다른 요청이 이미 잠금을 보유해 복구하지 못해도 오래된 Redis 결과 대신 해당 DB snapshot으로 계산한 정확한 결과를 반환한다.
-- 복구 시 일자별 ZSET과 처리 건수를 함께 기록하고, 주문이 없는 날짜는 처리 건수 `0`과 `EMPTY` 상태를 기록한다. 이때 응답은 복구 성공 여부와 관계없이 DB snapshot 결과를 사용한다. API 요청·응답 필드는 변경하지 않는다.
+- 복구 시 일자별 ZSET과 처리 건수를 함께 기록하고, 주문이 없는 날짜는 처리 건수 `0`과 `EMPTY` 상태를 기록한다. Redis 연결·명령 실행·명령 timeout 실패 시에는 HTTP 5xx로 전파하지 않고 같은 DB 원장 snapshot 결과를 반환하며, lock·lease·write를 추가로 시도하지 않는다. DB 원장 조회 실패는 fallback으로 숨기지 않고 기존 공통 오류 처리 정책을 따른다. 이때 응답은 복구 성공 여부와 관계없이 DB snapshot 결과를 사용한다. API 요청·응답 필드는 변경하지 않는다.
 
 ### 예외 처리 기준
 

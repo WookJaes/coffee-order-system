@@ -522,7 +522,7 @@ GET /api/menus/popular
 }
 ```
 
-Asia/Seoul 기준 요청일을 포함한 최근 7개 달력일의 일자별 Redis ZSET 점수를 메뉴별로 합산한다. 조회 시 ZSET·`DATA/EMPTY` 상태·count를 하나의 원자 snapshot으로 읽고, `orders.ordered_at`의 시작일 00:00 이상·요청 다음 날 00:00 미만 범위에서 `PAID` 주문 건수를 일자별로 비교한다. 모두 일치하면 Redis 랭킹을 사용하고, 하나라도 다르면 재구성 잠금을 사용해 DB 원장으로 복구한다. 응답은 복구 성공 여부와 관계없이 해당 DB snapshot 결과를 사용한다. 정렬은 주문 횟수 내림차순, 동점이면 숫자 메뉴 ID 오름차순이다. 현재 `ACTIVE` 메뉴만 최대 3건 반환하며 제외된 메뉴는 다음 ACTIVE 메뉴로 보충한다. 주문이 없는 날짜는 count `0`과 `EMPTY` 상태로 기록한다.
+Asia/Seoul 기준 요청일을 포함한 최근 7개 달력일의 일자별 Redis ZSET 점수를 메뉴별로 합산한다. 조회 시 ZSET·`DATA/EMPTY` 상태·count를 하나의 원자 snapshot으로 읽고, `orders.ordered_at`의 시작일 00:00 이상·요청 다음 날 00:00 미만 범위에서 `PAID` 주문 건수를 일자별로 비교한다. 모두 일치하면 Redis 랭킹을 사용하고, 하나라도 다르면 재구성 잠금을 사용해 DB 원장으로 복구한다. Redis 연결 실패, 명령 실행 실패 또는 명령 timeout이 발생하면 재구성 lock·lease·write를 추가로 시도하지 않고 해당 DB 원장 집계 결과를 반환한다. DB 원장 조회 실패는 fallback으로 숨기지 않고 공통 오류 처리 정책을 따른다. 응답은 복구 성공 여부와 관계없이 해당 DB snapshot 결과를 사용한다. 정렬은 주문 횟수 내림차순, 동점이면 숫자 메뉴 ID 오름차순이다. 현재 `ACTIVE` 메뉴만 최대 3건 반환하며 제외된 메뉴는 다음 ACTIVE 메뉴로 보충한다. 주문이 없는 날짜는 count `0`과 `EMPTY` 상태로 기록한다.
 
 ## 5. 공통 응답 및 예외 처리
 
