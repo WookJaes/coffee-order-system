@@ -131,27 +131,32 @@ coffee:ranking:{yyyy-MM-dd} 7개 키
 -> score 내림차순 상위 3개 조회
 ```
 
+각 일자에는 다음 파생 키도 함께 둔다.
+
+```text
+coffee:ranking:count:{yyyy-MM-dd}       Consumer 처리 주문 건수
+coffee:ranking:status:{yyyy-MM-dd}      DATA 또는 EMPTY
+coffee:ranking:processed:{eventId}      중복 소비 marker
+```
+
 Redis ZSET을 사용하는 이유는 인기 메뉴 조회가 자주 호출될 수 있고, 매번 `orders` 테이블을 집계하면 데이터가 많아질수록 조회 비용이 커지기 때문이다. Redis는 메뉴별 주문 수 증가와 상위 랭킹 조회에 적합하다.
 
-`order-paid` Consumer는 `product-ranking-group`으로 메시지를 소비한다. 일자별 랭킹·상태 키의 날짜는 Consumer 처리 시각이 아니라 이벤트 `orderedAt`을 Asia/Seoul 날짜로 변환한 값이다. 따라서 자정 이후의 지연 소비나 재소비도 원장 주문일에 반영된다. 동시성, 키·마커 TTL, 재시도 횟수와 DLT 토픽은 `RANKING_CONSUMER_*`, `RANKING_REDIS_KEY_TTL` 환경 변수로 설정한다. Redis 재구성 잠금은 `RANKING_REDIS_REBUILD_LOCK_TTL`, 주기적 lease 연장은 이보다 짧아야 하는 `RANKING_REDIS_REBUILD_LOCK_RENEW_INTERVAL`로 분리한다. `.env.example`은 3개 파티션을 병렬 처리하도록 동시성 3, 잠금 TTL `PT1M`, 연장 주기 `PT20S`를 예시로 제공한다. `eventId` 중복 마커와 `coffee:ranking:{yyyy-MM-dd}` ZSET의 `menuId` 점수 증가는 `src/main/resources/scripts/ranking-process-once.lua`의 Redis Lua로 원자 처리하므로 Kafka 재전달도 점수를 중복 증가시키지 않는다. 스크립트는 애플리케이션 시작 시 classpath resource에서 한 번 로드한다. 이벤트 한 건은 주문 횟수 1건으로 집계하며, 인기 메뉴 조회 API는 후속 범위다.
+`order-paid` Consumer는 `product-ranking-group`으로 메시지를 소비한다. 일자별 랭킹·상태·count 키의 날짜는 Consumer 처리 시각이 아니라 이벤트 `orderedAt`을 Asia/Seoul 날짜로 변환한 값이다. 따라서 자정 이후의 지연 소비나 재소비도 원장 주문일에 반영된다. 동시성, 키·마커 TTL, 재시도 횟수와 DLT 토픽은 `RANKING_CONSUMER_*`, `RANKING_REDIS_KEY_TTL` 환경 변수로 설정한다. Redis 재구성 잠금은 `RANKING_REDIS_REBUILD_LOCK_TTL`, 주기적 lease 연장은 이보다 짧아야 하는 `RANKING_REDIS_REBUILD_LOCK_RENEW_INTERVAL`로 분리한다. `.env.example`은 3개 파티션을 병렬 처리하도록 동시성 3, 잠금 TTL `PT1M`, 연장 주기 `PT20S`를 예시로 제공한다. 새 eventId의 중복 마커, `coffee:ranking:{yyyy-MM-dd}` ZSET 점수, 일자별 count 증가, `DATA` 상태와 TTL은 `src/main/resources/scripts/ranking-process-once.lua`의 한 Redis Lua로 원자 처리하므로 Kafka 재전달도 점수와 처리 건수를 중복 증가시키지 않는다. 스크립트는 애플리케이션 시작 시 classpath resource에서 한 번 로드한다. 이벤트 한 건은 주문 수량이 아니라 주문 횟수 1건으로 집계한다.
 
-다만 Redis 랭킹은 실시간 조회 최적화 용도이다. 정확한 주문 원장은 `orders` 테이블이며, Redis 장애 또는 데이터 유실 시에는 `orders` 기준으로 랭킹을 재구성할 수 있어야 한다. 재구성의 `PAID` 일자 집계와 Outbox marker 조회는 호출자 트랜잭션을 suspend하는 독립적인 읽기 전용 `REPEATABLE_READ` 트랜잭션에서 수행한다. 따라서 두 조회 사이에 커밋된 주문이 점수와 marker 중 하나에만 반영되지 않는다.
+다만 Redis 랭킹은 실시간 조회 최적화 용도이다. 정확한 주문 원장은 `orders` 테이블이며, Redis 처리 count와 일자별 `PAID` 주문 건수가 하나라도 다르면 Redis 결과를 신뢰하지 않는다. 인기 메뉴 조회는 Asia/Seoul 기준 요청일 포함 7개 달력일의 ZSET·상태·count를 하나의 Lua snapshot으로 읽은 뒤, 동일 `REQUIRES_NEW`·읽기 전용·`REPEATABLE_READ` DB snapshot에서 `orders`를 집계한다. 모두 일치하고 상태가 완전할 때만 Redis 랭킹을 반환하며, 불일치·부분 유실이면 기존 재구성 잠금을 사용한다. 다른 인스턴스가 잠금을 보유한 경우에도 오래된 Redis 대신 DB snapshot 결과를 응답한다. 재구성의 `PAID` 일자 집계와 Outbox marker 조회는 같은 DB snapshot에서 수행하고, 일자별 ZSET·count·`DATA/EMPTY` 상태를 함께 복원한다.
 
 정확성 검증 또는 복구 기준 쿼리는 다음과 같다.
 
 ```sql
 select
-    m.id as menu_id,
-    m.name,
-    m.price,
+    date(o.ordered_at) as ordered_date,
+    o.menu_id,
     count(o.id) as order_count
 from orders o
-join menus m on o.menu_id = m.id
 where o.status = 'PAID'
-  and o.ordered_at >= now() - interval 7 day
-group by m.id, m.name, m.price
-order by order_count desc
-limit 3;
+  and o.ordered_at >= :start
+  and o.ordered_at < :end
+group by date(o.ordered_at), o.menu_id;
 ```
 
 ### 2.7 다중 서버 및 고가용성 확장 전략
@@ -515,7 +520,7 @@ GET /api/menus/popular
 }
 ```
 
-요청일을 포함한 최근 7일의 일자별 Redis ZSET 점수를 메뉴별로 합산한다. 정렬은 주문 횟수 내림차순, 동점이면 숫자 메뉴 ID 오름차순이다. 현재 `ACTIVE` 메뉴만 최대 3건 반환한다. 7일치 Redis 랭킹이 모두 비어 있으면 `orders.ordered_at`의 같은 기간 `PAID` 주문을 일자·메뉴별로 집계해 응답하고, 결과가 있으면 같은 일자별 ZSET과 TTL을 복구한다. DB 집계도 비어 있으면 주문이 없는 정상 상태로 빈 목록을 반환한다.
+Asia/Seoul 기준 요청일을 포함한 최근 7개 달력일의 일자별 Redis ZSET 점수를 메뉴별로 합산한다. 조회 시 ZSET·`DATA/EMPTY` 상태·count를 하나의 원자 snapshot으로 읽고, `orders.ordered_at`의 시작일 00:00 이상·요청 다음 날 00:00 미만 범위에서 `PAID` 주문 건수를 일자별로 비교한다. 모두 일치하면 Redis 랭킹을 사용하고, 하나라도 다르면 재구성 잠금을 사용해 DB 원장으로 복구한다. 응답은 복구 성공 여부와 관계없이 해당 DB snapshot 결과를 사용한다. 정렬은 주문 횟수 내림차순, 동점이면 숫자 메뉴 ID 오름차순이다. 현재 `ACTIVE` 메뉴만 최대 3건 반환하며 제외된 메뉴는 다음 ACTIVE 메뉴로 보충한다. 주문이 없는 날짜는 count `0`과 `EMPTY` 상태로 기록한다.
 
 ## 5. 공통 응답 및 예외 처리
 
