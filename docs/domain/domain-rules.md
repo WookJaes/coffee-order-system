@@ -58,3 +58,9 @@
 - 하나라도 불일치하면 기존 재구성 잠금을 사용한다. 다른 인스턴스가 이미 잠금을 보유한 경우에도 오래된 Redis 결과를 반환하지 않고 DB snapshot 결과를 반환한다.
 - 7일 Redis 랭킹이 비거나 불일치하면 `PAID` 주문 원장으로 일자별 랭킹과 처리 건수를 재구성한다. 주문이 없는 날짜도 처리 건수 `0`과 `EMPTY` 상태를 명확히 기록한다. 원장도 비면 주문이 없는 정상 상태로 빈 목록을 반환한다.
 - 랭킹 재구성의 `PAID` 일자 집계와 Outbox 이벤트 marker 조회는 호출자 트랜잭션과 독립적인 읽기 전용 `REPEATABLE_READ` snapshot에서 함께 수행한다. 두 조회 사이에 새 주문이 커밋돼도 점수와 marker의 주문 집합은 달라지지 않는다.
+
+## Outbox 운영 재처리
+
+- 관리 API는 `FAILED -> PENDING` 단건 전이만 허용한다. `PENDING`, `PROCESSING`, `SENT` 재처리 요청은 이벤트 상태·재시도 정보 변경 없이 거부한다.
+- 재처리 트랜잭션은 이벤트 row를 비관적으로 잠가 Publisher 완료 처리와 충돌하지 않게 한다. 재처리 시 `retry_count=0`, `processing_token=null`, `processing_started_at=null`, `next_attempt_at=현재 시각`으로 바꾸고 기존 `last_error`는 보존한다.
+- `SENT` 이벤트는 최소 30일 보관 후 백업 또는 아카이브 완료 대상을 삭제 배치로 정리할 예정이며, 이번 범위에서는 삭제 배치를 구현하지 않는다. `FAILED` 이벤트는 운영자 확인·재처리 전까지 자동 삭제하지 않는다.

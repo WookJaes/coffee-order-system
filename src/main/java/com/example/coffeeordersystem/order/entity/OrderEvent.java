@@ -96,4 +96,15 @@ public class OrderEvent extends BaseEntity {
 		this.status = OrderEventStatus.PENDING;
 		this.nextAttemptAt = now.plus(retryBackoff);
 	}
+
+	public void reprocess(LocalDateTime now) {
+		if (this.status != OrderEventStatus.FAILED) {
+			throw new IllegalStateException("FAILED 상태의 Outbox 이벤트만 재처리할 수 있습니다.");
+		}
+		this.status = OrderEventStatus.PENDING;
+		this.retryCount = 0;
+		this.processingStartedAt = null;
+		this.processingToken = null;
+		this.nextAttemptAt = now;
+	}
 }
