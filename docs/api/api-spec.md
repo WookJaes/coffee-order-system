@@ -138,3 +138,27 @@ Idempotency-Key: 4de91f71-4c2d-4eb9-bc8e-2b0f4603a1fb
 - 지원하지 않는 HTTP 메서드는 405 공통 오류 응답을 반환한다.
 - 지원하지 않는 Content-Type은 415 공통 오류 응답을 반환한다.
 - 예상하지 못한 예외는 내부 상세를 노출하지 않는 500 공통 오류 응답을 반환하고 ERROR 로그를 남긴다.
+
+### 관리 Outbox API
+
+관리 API는 현재 인증·인가가 없으므로 운영 환경에서는 반드시 관리자 인증·인가 또는 사설 네트워크 접근 제어로 보호해야 한다.
+
+#### POST /api/admin/outbox/events/{eventId}/reprocess
+
+`FAILED` 이벤트 한 건만 재처리한다. 성공 시 `PENDING`으로 전환되어 다음 Publisher 실행에서 선점·발행할 수 있다.
+
+```json
+{"status":200,"message":"요청이 성공했습니다.","data":{"eventId":12,"status":"PENDING","nextAttemptAt":"2026-07-19T12:00:00"}}
+```
+
+- 이벤트가 없으면 `404`, `Outbox 이벤트를 찾을 수 없습니다.` 공통 오류를 반환한다.
+- `PENDING`, `PROCESSING`, `SENT`는 `409`, `FAILED 상태의 Outbox 이벤트만 재처리할 수 있습니다.` 공통 오류를 반환한다.
+- 재처리 시 `retryCount`는 0, `processingToken`·`processingStartedAt`은 null, `nextAttemptAt`은 현재 시각으로 설정한다. `lastError`는 장애 추적을 위해 보존하며, 이후 Kafka 성공 시 기존 `markSent()` 정책에 따라 null로 정리된다.
+
+#### GET /api/admin/outbox/status-counts
+
+운영 적체·실패 확인용으로 `PENDING`, `PROCESSING`, `FAILED` 건수를 반환한다. `SENT`는 발행 완료 상태이므로 포함하지 않는다.
+
+```json
+{"status":200,"message":"요청이 성공했습니다.","data":{"pending":3,"processing":2,"failed":1}}
+```

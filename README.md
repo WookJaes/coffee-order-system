@@ -176,6 +176,8 @@ group by date(o.ordered_at), o.menu_id;
 
 MySQL은 쓰기 작업이 필요한 주문, 포인트 충전, 포인트 차감은 Primary에서 처리하고, 메뉴 조회나 인기 메뉴 조회 같은 읽기 요청은 Replica로 분산할 수 있다. 다만 주문 직후 즉시 반영되어야 하는 데이터는 복제 지연을 고려해 Primary를 조회하거나 정합성 요구 수준에 따라 조회 전략을 분리한다.
 
+Outbox Publisher를 다중 애플리케이션 서버 환경으로 확장할 때는, 서버 간 clock skew로 인한 조기 회수 또는 회수 지연을 막기 위해 lease 선점과 갱신 기준을 DB 시간 또는 UTC `Instant`로 통일해야 한다.
+
 ## 3. 기술 선택 이유
 
 | 기술 | 선택 이유 |
@@ -724,3 +726,11 @@ curl -X POST http://localhost:8080/api/orders \
 ```bash
 curl -X GET http://localhost:8080/api/menus/popular
 ```
+
+### Outbox FAILED 이벤트 운영 재처리
+
+관리자는 `GET /api/admin/outbox/status-counts`로 `PENDING`, `PROCESSING`, `FAILED` 적체를 확인하고, 원인 확인 후 `POST /api/admin/outbox/events/{eventId}/reprocess`로 `FAILED` 이벤트 한 건을 다시 발행 대기 상태로 전환할 수 있다. 재처리 성공 시 `retryCount`는 0으로 초기화하고 lease 필드(`processingToken`, `processingStartedAt`)는 비우며, 즉시 발행 가능하도록 `nextAttemptAt`을 현재 시각으로 설정한다. 장애 원인 추적을 위해 기존 `lastError`는 보존하고 Kafka 발행 성공 시 기존 `SENT` 처리에서 제거한다.
+
+이 API는 현재 인증·인가 기능 범위 밖이므로 운영 환경에서는 관리자 인증·인가 또는 사설 네트워크 접근 제어로 반드시 보호해야 한다. Outbox 전달은 재처리 및 Kafka 성공 후 DB 완료 실패로 중복될 수 있는 at-least-once 방식이며, 모든 수신 시스템은 `eventId` 기준 멱등 처리가 필요하다.
+
+`SENT` 이벤트는 최소 30일 보관한다. 이후 삭제 대상은 사전 백업 또는 아카이브가 완료된 이벤트로 한정하고, 삭제 배치는 후속 작업에서 도입한다. `FAILED` 이벤트는 운영자 확인·재처리 전까지 자동 삭제하지 않는다.

@@ -32,6 +32,8 @@ Issue #6은 주문 트랜잭션에서 저장된 `order_events`를 `order-paid` K
 
 `PROCESSING` 상태에서 프로세스가 중단될 수 있으므로 Publisher는 lease 갱신이 멈춘 이벤트를 다시 `PENDING`으로 복구하는 정책을 가져야 한다. Kafka는 at-least-once 전송이므로 Consumer는 중복을 처리해야 하며, 이 결정은 ADR-005와 함께 적용한다. Kafka 발행이 `processingTimeout`보다 오래 걸릴 수 있으므로, 발행을 진행 중인 유효한 선점은 같은 토큰 조건으로 배치 전체 lease 시각을 갱신한다. Publisher 또는 갱신이 멈추면 그 토큰의 이벤트 모두 기존 stale recovery cutoff를 지나 회복 대상이 된다.
 
+다중 애플리케이션 서버 환경으로 확장할 때는 서버 간 clock skew로 인한 조기 회수 또는 회수 지연을 막기 위해, lease 선점과 갱신 기준을 DB 시간 또는 UTC `Instant`로 통일해야 한다.
+
 ### 구현 내용
 
 - `OutboxEventClaimService`는 짧은 `REQUIRES_NEW` 트랜잭션에서 오래된 `PROCESSING`을 복구하고 조건부 갱신으로 선점한다.
@@ -48,3 +50,11 @@ Issue #6은 주문 트랜잭션에서 저장된 `order_events`를 `order-paid` K
 - Kafka 발행 성공 뒤 `SENT` DB 기록 실패가 Kafka 실패 상태로 덮어써지지 않고, stale recovery 뒤 재발행되는지 확인한다.
 - stale recovery로 토큰이 바뀐 뒤 이전 Publisher의 완료·실패 처리가 현재 선점 상태를 변경하지 않는지 확인한다.
 - 주문 성공 후 Kafka 장애가 발생해도 주문·포인트·Outbox 레코드가 유지되는지 확인한다.
+
+## Issue #52 운영 재처리·보관 정책
+
+`FAILED` 이벤트만 관리 API에서 단건 `PENDING`으로 되돌린다. 재처리 트랜잭션은 대상 row를 비관적으로 잠그므로 완료 처리와 상태 갱신이 충돌하지 않는다. 새 발행 시도이므로 retry count는 0으로 초기화하고, processing token·시각은 비우며, 다음 시도 시각은 현재 시각으로 둔다. 장애 분석을 위해 `last_error`는 남기고, Kafka 발행 성공의 기존 `markSent()`가 이를 정리한다.
+
+관리 API는 `POST /api/admin/outbox/events/{eventId}/reprocess`, `GET /api/admin/outbox/status-counts`이며 현재 인증·인가 범위 밖이다. 운영 배포 전에는 관리자 인증·인가 또는 사설망 접근 제어로 반드시 보호한다.
+
+`SENT` 이벤트는 최소 30일 보관하고, 삭제 전 백업 또는 아카이브가 완료된 이벤트만 향후 삭제 배치 대상으로 한다. 이번 이슈에는 자동 삭제 배치를 넣지 않는다. `FAILED`는 운영자 확인·재처리 전까지 자동 삭제하지 않는다. 수동 재처리와 Kafka 성공 뒤 DB 완료 실패는 중복 전송을 만들 수 있으므로 전달은 계속 at-least-once이며 수신 시스템은 `eventId` 멱등 처리가 필요하다.
