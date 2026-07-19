@@ -28,6 +28,9 @@
 - Kafka send executor 거절 또는 작업 미시작 시 Kafka 호출 없이 기존 backoff·재시도 경로로 전환하는지 확인
 - Kafka 중복 메시지, Redis 갱신 실패 후 DLT 이동
 - Redis Lua 집계의 날짜별 키·TTL·메뉴 주문 수 증가와 같은 `eventId`의 중복 무증가, 자정 경계·지연 소비에도 이벤트 주문 시각의 Asia/Seoul 날짜 키 선택. `orderedAt`이 없는 이전 Kafka 메시지는 주문 원장으로 시각을 보완한다.
+- 새 eventId 한 번의 Lua 연산에서 중복 마커·ZSET 점수·일자별 처리 주문 건수·`DATA` 상태·TTL이 함께 기록되고, 동일 eventId 재소비에서 ZSET과 처리 건수가 모두 한 번만 증가하는지 확인한다.
+- `DATA`/`EMPTY` 상태 뒤 Consumer가 아직 처리하지 않은 새 `PAID` 주문, Outbox `PENDING/PROCESSING/FAILED`, Kafka 재시도·DLT 지연으로 Redis가 뒤처진 경우 DB 원장 snapshot 응답이 누락되지 않는지 확인한다.
+- 인기 조회의 단일 Redis snapshot이 점수와 처리 건수를 혼합하지 않는지, 여러 서버가 재구성을 동시에 시도할 때 한 서버만 쓰고 두 요청 모두 DB snapshot 결과를 반환하는지 확인한다.
 - Testcontainers Redis에서 실제 Lua 실행으로 중복 이벤트의 ZSET 점수 무증가와 마커·랭킹 키 TTL 검증. Docker daemon이 없으면 이 테스트는 skip하며, Docker 사용 환경에서는 JUnit 결과의 `skipped=0`을 확인한다.
 - 신규 로컬 MySQL DB는 공통 V1/V2/V4/V5와 로컬 전용 V3를 적용해 메뉴 5건과 `users.id=1` 테스트 사용자를 준비한다.
 - 신규 로컬이 아닌 MySQL DB는 공통 V1/V2/V4/V5만 적용해 메뉴 5건을 준비하고 `users.id=1` 테스트 사용자를 생성하지 않는다.
@@ -36,6 +39,7 @@
 - classpath Lua 리소스 로드와 집계 서비스의 스크립트 주입
 - 임베디드 Kafka에서 일반 Redis 실패 시 최초 처리 1회와 재시도 2회(총 3회) 뒤 DLT 이동, 재구성 잠금 예외는 같은 재시도 예산을 넘어도 잠금 해제 뒤 처리, 성공 전 offset 미커밋(RECORD ack), 파티션 수와 Consumer 동시성 정합성
 - 최근 7일 Top 3, 동점 정렬, DB 재구성 쿼리
+- Asia/Seoul 자정 및 최근 7개 달력일 경계, 시작일 00:00 이상·다음 날 00:00 미만, `PAID`만 집계하고 quantity가 아닌 주문 1건 단위로 집계하는지 확인한다.
 - 실제 MySQL에서 외부 `READ_COMMITTED` 트랜잭션으로 랭킹 재구성을 호출하고, 일자 집계 뒤 별도 트랜잭션으로 주문·Outbox를 커밋해도 `REQUIRES_NEW` 읽기 전용 `REPEATABLE_READ` snapshot의 점수와 marker가 같은 초기 주문 집합을 사용하는지 확인
 - 인기 메뉴 API의 `rank/menuId/menuName/orderCount` 공통 성공 응답, `ACTIVE` 메뉴 필터와 순위 보충, Redis 비어 있음 뒤 `PAID` 주문 기반 일자별 ZSET 복구
 - Redis 재구성 잠금 중 Consumer가 ZSET을 갱신하지 않고 재시도하며, 재구성 뒤 복원된 이벤트 마커로 중복 집계를 막는지 확인

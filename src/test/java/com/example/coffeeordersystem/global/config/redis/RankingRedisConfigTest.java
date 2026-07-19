@@ -23,7 +23,21 @@ class RankingRedisConfigTest {
 
 		// then
 		assertThat(aggregationService).isNotNull();
-		assertThat(script.getScriptAsString()).contains("ZINCRBY");
+		assertThat(script.getScriptAsString())
+			.contains("ZINCRBY", "INCRBY", "KEYS[4]", "KEYS[5]");
+	}
+
+	@Test
+	void Redis_7일_snapshot_Lua는_상태_count와_ZSET을_함께_읽는다() {
+		// given
+		RankingRedisConfig config = new RankingRedisConfig(new RankingRedisProperties(Duration.ofDays(8), Duration.ofMinutes(1), Duration.ofSeconds(20)));
+
+		// when
+		RedisScript<String> script = config.rankingReadSnapshotScript();
+
+		// then
+		assertThat(script.getScriptAsString())
+			.contains("GET", "EXISTS", "ZRANGE", "WITHSCORES");
 	}
 
 	@Test
@@ -51,6 +65,8 @@ class RankingRedisConfigTest {
 			new RankingRedisProperties(keyTtl, lockTtl, lockTtl);
 		org.assertj.core.api.ThrowableAssert.ThrowingCallable subSecondTtl = () ->
 			new RankingRedisProperties(keyTtl, Duration.ofMillis(500), Duration.ofMillis(100));
+		org.assertj.core.api.ThrowableAssert.ThrowingCallable subSecondKeyTtl = () ->
+			new RankingRedisProperties(Duration.ofMillis(500), lockTtl, Duration.ofSeconds(1));
 		org.assertj.core.api.ThrowableAssert.ThrowingCallable subSecondInterval = () ->
 			new RankingRedisProperties(keyTtl, lockTtl, Duration.ofMillis(500));
 
@@ -58,6 +74,7 @@ class RankingRedisConfigTest {
 		assertThatThrownBy(zeroInterval).isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(equalInterval).isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(subSecondTtl).isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(subSecondKeyTtl).isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(subSecondInterval).isInstanceOf(IllegalArgumentException.class);
 	}
 }

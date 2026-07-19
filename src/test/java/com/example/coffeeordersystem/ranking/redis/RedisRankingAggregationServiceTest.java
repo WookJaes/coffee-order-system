@@ -54,6 +54,7 @@ class RedisRankingAggregationServiceTest {
 		assertThat(keyCaptor.getValue()).containsExactly(
 			"coffee:ranking:processed:42",
 			"coffee:ranking:2026-07-14",
+			"coffee:ranking:count:2026-07-14",
 			"coffee:ranking:rebuilding",
 			"coffee:ranking:status:2026-07-14"
 		);
@@ -97,6 +98,36 @@ class RedisRankingAggregationServiceTest {
 		// then
 		assertThatThrownBy(aggregate).isInstanceOf(IllegalStateException.class)
 			.hasMessage("랭킹 Redis 재구성 중입니다.");
+	}
+
+	@Test
+	void Redis_집계_키_사전검증_실패는_부분_반영없이_형식_오류를_전파한다() {
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.<RedisScript<Long>>any(),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(-2L);
+
+		assertThatThrownBy(() -> service.aggregate(new OrderPaidEvent(
+			42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0)
+		)))
+			.isInstanceOf(IllegalStateException.class)
+			.hasMessage("랭킹 Redis 집계 키 형식이 올바르지 않습니다.");
+	}
+
+	@Test
+	void Redis_연결_예외는_재구성_불일치로_바꾸지_않고_그대로_전파한다() {
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.<RedisScript<Long>>any(),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenThrow(new RuntimeException("redis unavailable"));
+
+		assertThatThrownBy(() -> service.aggregate(new OrderPaidEvent(
+			42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0)
+		)))
+			.isInstanceOf(RuntimeException.class)
+			.hasMessage("redis unavailable");
 	}
 
 	@SuppressWarnings("unchecked")

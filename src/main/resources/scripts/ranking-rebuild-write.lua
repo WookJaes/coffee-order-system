@@ -19,6 +19,11 @@ if ARGV[2] == 'RANKING' then
   return 1
 end
 
+if ARGV[2] == 'COUNT' then
+  redis.call('SET', KEYS[2], ARGV[4], 'EX', ARGV[3])
+  return 1
+end
+
 if ARGV[2] == 'STATUS' then
   redis.call('SET', KEYS[2], ARGV[4], 'EX', ARGV[3])
   return 1

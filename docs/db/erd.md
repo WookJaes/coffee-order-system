@@ -88,3 +88,16 @@ erDiagram
 상태와 유형은 Java enum을 `@Enumerated(EnumType.STRING)`으로 저장한다. DB 컬럼 타입은 `VARCHAR`다.
 
 주요 인덱스는 `points(user_id)`, `orders(user_id, idempotency_key)`, `orders(status, ordered_at)`, `order_events(status, next_attempt_at, id)`, `order_events(processing_token)`를 사용한다.
+
+## 인기 메뉴 Redis 파생 데이터
+
+인기 메뉴의 정확성 원장은 위 `orders` 테이블이다. Redis는 DB 테이블이나 추가 Flyway 스키마가 아닌 조회용 파생 저장소로 다음 키를 사용한다.
+
+| 키 | 의미 |
+| --- | --- |
+| `coffee:ranking:{yyyy-MM-dd}` | 일자별 메뉴 ZSET, score는 주문 횟수 |
+| `coffee:ranking:count:{yyyy-MM-dd}` | Consumer가 처리한 해당 일자 주문 건수 |
+| `coffee:ranking:status:{yyyy-MM-dd}` | 일자 집계 완료 상태 `DATA` 또는 `EMPTY` |
+| `coffee:ranking:processed:{eventId}` | eventId 중복 소비 마커 |
+
+Consumer는 새 eventId의 마커·ZSET·처리 건수·상태·TTL을 한 Lua 연산으로 기록한다. 조회는 7개 일자의 ZSET·상태·처리 건수를 원자 snapshot으로 읽고, `orders.status = 'PAID'` 일자별 건수와 비교한다. 불일치 시 기존 재구성 잠금으로 위 파생 키를 원장 기준으로 복원하며, 인덱스는 실제 집계 쿼리와 실행 계획을 확인하기 전에는 추가하지 않는다.

@@ -47,9 +47,13 @@
 - `OrderPaidEvent`는 주문 원장(`orders.ordered_at`)의 Asia/Seoul 주문 시각을 포함하며, Consumer는 처리 시각과 관계없이 이 주문 시각의 날짜를 일별 Redis 랭킹·완료 상태 키에 사용한다.
 - Redis ZSET은 조회 최적화를 위한 파생 데이터다.
 - Consumer는 이벤트 ID 기준으로 중복 소비를 방지한다.
-- Consumer는 Redis 원자 연산으로 중복 마커 등록과 날짜별 ZSET 주문 수 증가를 함께 처리한다.
+- Consumer는 Redis Lua 원자 연산으로 중복 마커 등록, 날짜별 ZSET 주문 수 증가, 일자별 처리 주문 건수 증가, `DATA` 상태 기록과 관련 키 TTL 설정을 함께 처리한다. 키는 `coffee:ranking:processed:{eventId}`, `coffee:ranking:{yyyy-MM-dd}`, `coffee:ranking:count:{yyyy-MM-dd}`, `coffee:ranking:status:{yyyy-MM-dd}`다.
+- 이미 처리된 eventId는 메뉴 점수와 일자별 처리 주문 건수를 모두 증가시키지 않는다.
 - Redis 처리 실패는 Consumer 예외로 전파해 Kafka 재시도·DLT 정책을 적용한다.
 - 최근 7일 랭킹의 동점은 메뉴 ID 오름차순으로 결정한다.
 - 인기 메뉴 조회는 현재 `ACTIVE` 메뉴만 반환하며, 랭킹에 남은 `SOLD_OUT` 또는 삭제 메뉴는 건너뛰고 다음 메뉴로 최대 3건을 채운다.
-- 7일 Redis 랭킹이 비면 `PAID` 주문 원장으로 일자별 랭킹을 재구성한다. 원장도 비면 주문이 없는 정상 상태로 빈 목록을 반환한다.
+- 기간은 Asia/Seoul 기준 요청일을 포함한 7개 달력일이며, DB 집계 범위는 시작일 00:00 이상·요청 다음 날 00:00 미만이다. `PAID` 주문만 포함하고 주문 `quantity`가 아니라 주문 1건을 1회로 집계한다.
+- 인기 메뉴 조회는 7개 일자의 ZSET·상태·처리 건수를 하나의 Redis Lua snapshot으로 읽는다. Redis 처리 건수와 `orders`의 일자별 `PAID` 주문 건수가 모두 같고 상태가 완전할 때만 Redis 랭킹을 반환한다.
+- 하나라도 불일치하면 기존 재구성 잠금을 사용한다. 다른 인스턴스가 이미 잠금을 보유한 경우에도 오래된 Redis 결과를 반환하지 않고 DB snapshot 결과를 반환한다.
+- 7일 Redis 랭킹이 비거나 불일치하면 `PAID` 주문 원장으로 일자별 랭킹과 처리 건수를 재구성한다. 주문이 없는 날짜도 처리 건수 `0`과 `EMPTY` 상태를 명확히 기록한다. 원장도 비면 주문이 없는 정상 상태로 빈 목록을 반환한다.
 - 랭킹 재구성의 `PAID` 일자 집계와 Outbox 이벤트 marker 조회는 호출자 트랜잭션과 독립적인 읽기 전용 `REPEATABLE_READ` snapshot에서 함께 수행한다. 두 조회 사이에 새 주문이 커밋돼도 점수와 marker의 주문 집합은 달라지지 않는다.
