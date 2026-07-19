@@ -24,6 +24,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.RedisSystemException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -87,8 +90,13 @@ public class PopularMenuRankingService {
 		LocalDate today = LocalDate.now(clock);
 		LocalDateTime start = today.minusDays(RANKING_DAYS - 1L).atStartOfDay();
 		LocalDateTime end = today.plusDays(1).atStartOfDay();
-		RedisRankingSnapshot redisSnapshot = readRedisSnapshot(today);
 		LedgerSnapshot ledger = buildLedgerSnapshot(today, orderRepository.findDailyPaidMenuOrderCounts(start, end));
+		RedisRankingSnapshot redisSnapshot;
+		try {
+			redisSnapshot = readRedisSnapshot(today);
+		} catch (RedisConnectionFailureException | RedisSystemException | QueryTimeoutException exception) {
+			return toTopRankings(ledger.totals());
+		}
 		if (redisSnapshot.matches(today, ledger.dailyCounts(), ledger.dailyMenuCounts())) {
 			return toTopRankings(redisSnapshot.orderCounts());
 		}
@@ -198,16 +206,22 @@ public class PopularMenuRankingService {
 		LedgerSnapshot ledger
 	) {
 		String lockToken = UUID.randomUUID().toString();
-		Boolean locked = redisTemplate.opsForValue().setIfAbsent(
-			RedisRankingKey.rebuilding(), lockToken, rebuildLockTtl
-		);
+		Boolean locked;
+		try {
+			locked = redisTemplate.opsForValue().setIfAbsent(
+				RedisRankingKey.rebuilding(), lockToken, rebuildLockTtl
+			);
+		} catch (RedisConnectionFailureException | RedisSystemException | QueryTimeoutException exception) {
+			return ledger.totals();
+		}
 		if (!Boolean.TRUE.equals(locked)) {
 			return ledger.totals();
 		}
 
 		List<String> restoredMarkerKeys = new ArrayList<>();
 		AtomicBoolean ownershipLost = new AtomicBoolean(false);
-		ScheduledFuture<?> leaseRenewal = startLeaseRenewal(lockToken, ownershipLost);
+		AtomicBoolean redisAccessFailed = new AtomicBoolean(false);
+		ScheduledFuture<?> leaseRenewal = startLeaseRenewal(lockToken, ownershipLost, redisAccessFailed);
 		try {
 			RedisRankingSnapshot currentRankings = readRedisSnapshot(today);
 			if (currentRankings.matches(today, ledger.dailyCounts(), ledger.dailyMenuCounts())) {
@@ -241,15 +255,32 @@ public class PopularMenuRankingService {
 				String status = dailyCount > 0L ? DATA_STATUS : EMPTY_STATUS;
 				writeRebuild(lockToken, List.of(RedisRankingKey.rebuilding(), RedisRankingKey.dailyStatus(date)), "STATUS", status);
 			}
+		} catch (RedisConnectionFailureException | RedisSystemException | QueryTimeoutException exception) {
+			redisAccessFailed.set(true);
+			return ledger.totals();
 		} catch (RuntimeException exception) {
-			cleanupFailedRebuild(lockToken, today, restoredMarkerKeys);
+			if (redisAccessFailed.get()) {
+				return ledger.totals();
+			}
+			try {
+				cleanupFailedRebuild(lockToken, today, restoredMarkerKeys);
+			} catch (RedisConnectionFailureException | RedisSystemException | QueryTimeoutException redisException) {
+				redisAccessFailed.set(true);
+				return ledger.totals();
+			}
 			if (!isOwnershipLost(exception)) {
 				throw exception;
 			}
 			return ledger.totals();
 		} finally {
 			leaseRenewal.cancel(false);
-			releaseRebuildLock(lockToken);
+			if (!redisAccessFailed.get()) {
+				try {
+					releaseRebuildLock(lockToken);
+				} catch (RedisConnectionFailureException | RedisSystemException | QueryTimeoutException ignored) {
+					// Redis 장애 중에는 DB 원장 결과를 반환하며 추가 Redis 호출을 하지 않는다.
+				}
+			}
 		}
 		return ledger.totals();
 	}
@@ -273,7 +304,11 @@ public class PopularMenuRankingService {
 		redisTemplate.execute(releaseLockScript, List.of(RedisRankingKey.rebuilding()), lockToken);
 	}
 
-	private ScheduledFuture<?> startLeaseRenewal(String lockToken, AtomicBoolean ownershipLost) {
+	private ScheduledFuture<?> startLeaseRenewal(
+		String lockToken,
+		AtomicBoolean ownershipLost,
+		AtomicBoolean redisAccessFailed
+	) {
 		long renewalSeconds = rebuildLockRenewInterval.toSeconds();
 		return leaseScheduler.scheduleAtFixedRate(() -> {
 			try {
@@ -286,6 +321,9 @@ public class PopularMenuRankingService {
 				if (!Long.valueOf(1L).equals(renewed)) {
 					ownershipLost.set(true);
 				}
+			} catch (RedisConnectionFailureException | RedisSystemException | QueryTimeoutException exception) {
+				redisAccessFailed.set(true);
+				ownershipLost.set(true);
 			} catch (RuntimeException exception) {
 				ownershipLost.set(true);
 			}

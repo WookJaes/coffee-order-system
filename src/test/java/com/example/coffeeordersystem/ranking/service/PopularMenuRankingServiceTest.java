@@ -176,16 +176,32 @@ class PopularMenuRankingServiceTest {
 	}
 
 	@Test
-	void Redis_snapshot_연결_예외는_불일치로_바꾸지_않고_그대로_전파한다() {
+	void Redis_snapshot_연결_예외가_발생하면_DB_원장_결과를_반환하고_추가_Redis_접근을_하지_않는다() {
+		// given
 		when(redisTemplate.execute(
 			org.mockito.ArgumentMatchers.same(readSnapshotScript),
 			org.mockito.ArgumentMatchers.<String>anyList(),
 			org.mockito.ArgumentMatchers.any(Object[].class)
-		)).thenThrow(new RuntimeException("redis unavailable"));
+		)).thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("redis unavailable"));
 
-		assertThatThrownBy(service::getPopularMenuRankings)
-			.isInstanceOf(RuntimeException.class)
-			.hasMessage("redis unavailable");
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 7L, 2L)
+		));
+
+		// when
+		var rankings = service.getPopularMenuRankings();
+
+		// then
+		assertThat(rankings)
+			.containsExactly(new PopularMenuRanking(7L, 2L));
+		verify(redisTemplate, org.mockito.Mockito.never()).opsForValue();
+		verify(redisTemplate).execute(
+			org.mockito.ArgumentMatchers.same(readSnapshotScript),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		);
+		org.mockito.Mockito.verifyNoMoreInteractions(redisTemplate);
+		org.mockito.Mockito.verifyNoInteractions(orderEventRepository, leaseScheduler);
 	}
 
 	@Test
