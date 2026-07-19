@@ -225,7 +225,7 @@ public class PopularMenuRankingService {
 		try {
 			RedisRankingSnapshot currentRankings = readRedisSnapshot(today);
 			if (currentRankings.matches(today, ledger.dailyCounts(), ledger.dailyMenuCounts())) {
-				return currentRankings.orderCounts();
+				return ledger.totals();
 			}
 
 			assertLockOwnership(ownershipLost);
