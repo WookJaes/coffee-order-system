@@ -63,6 +63,9 @@ class OutboxPublisherServiceTest {
 	@Autowired
 	private OutboxEventClaimService outboxEventClaimService;
 
+	@Autowired
+	private OutboxAdminService outboxAdminService;
+
 	@MockitoSpyBean
 	private OutboxEventCompletionService outboxEventCompletionService;
 
@@ -481,6 +484,31 @@ class OutboxPublisherServiceTest {
 		// then
 		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
 		verify(kafkaTemplate, times(1)).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+	}
+
+
+	@Test
+	void FAILED_이벤트를_재처리하면_Publisher가_다시_선점해_발행할_수_있다() {
+		EventFixture event = createOrderEvent("manual-reprocess");
+		jdbcTemplate.update(
+			"update order_events set status = ?, retry_count = ?, processing_token = ?, processing_started_at = ?, next_attempt_at = ?, last_error = ? where id = ?",
+			"FAILED", 4, "old-token", LocalDateTime.now().minusMinutes(1), LocalDateTime.now().plusDays(1), "broker unavailable", event.eventId()
+		);
+		doReturn(CompletableFuture.completedFuture(null)).when(kafkaTemplate)
+			.send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
+
+		outboxAdminService.reprocessFailedEvent(event.eventId());
+		OrderEvent reprocessed = orderEventRepository.findById(event.eventId()).orElseThrow();
+		assertThat(reprocessed.getStatus()).isEqualTo(OrderEventStatus.PENDING);
+		assertThat(reprocessed.getRetryCount()).isZero();
+		assertThat(reprocessed.getProcessingToken()).isNull();
+		assertThat(reprocessed.getProcessingStartedAt()).isNull();
+		assertThat(reprocessed.getLastError()).isEqualTo("broker unavailable");
+
+		outboxPublisherService.publishPendingEvents();
+
+		assertThat(orderEventRepository.findById(event.eventId()).orElseThrow().getStatus()).isEqualTo(OrderEventStatus.SENT);
+		verify(kafkaTemplate).send(eq(properties.topic()), eq(event.orderId().toString()), any(OrderPaidEvent.class));
 	}
 
 	private EventFixture createOrderEvent(String key) {
