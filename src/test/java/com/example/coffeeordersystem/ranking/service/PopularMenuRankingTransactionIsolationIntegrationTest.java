@@ -11,6 +11,7 @@ import com.example.coffeeordersystem.menu.entity.MenuStatus;
 import com.example.coffeeordersystem.menu.repository.MenuRepository;
 import com.example.coffeeordersystem.order.entity.Order;
 import com.example.coffeeordersystem.order.entity.OrderEvent;
+import com.example.coffeeordersystem.order.entity.OrderEventStatus;
 import com.example.coffeeordersystem.order.repository.OrderEventRepository;
 import com.example.coffeeordersystem.order.repository.OrderRepository;
 import com.example.coffeeordersystem.ranking.dto.PopularMenuRanking;
@@ -136,11 +137,60 @@ class PopularMenuRankingTransactionIsolationIntegrationTest {
 			.containsExactly("coffee:ranking:processed:" + initialEventId);
 	}
 
+	@Test
+	void Outbox_PENDING_PROCESSING_FAILED여도_PAID_주문_원장에서_정확한_주문_건수를_반환한다() {
+		// given
+		User user = userRepository.saveAndFlush(new User("랭킹 원장 사용자"));
+		Menu americano = menuRepository.saveAndFlush(new Menu("아메리카노", 4_500, MenuStatus.ACTIVE));
+		Menu latte = menuRepository.saveAndFlush(new Menu("카페라떼", 5_000, MenuStatus.ACTIVE));
+		savePaidOrderAndEvent(user.getId(), americano.getId(), "pending-order");
+		Long processingEventId = savePaidOrderAndEvent(user.getId(), americano.getId(), "processing-order");
+		Long failedEventId = savePaidOrderAndEvent(user.getId(), latte.getId(), "failed-order");
+		committedTransaction.executeWithoutResult(status ->
+			orderEventRepository.claimIfPending(processingEventId, "processing-token", LocalDateTime.of(2026, 7, 20, 10, 0))
+		);
+		OrderEvent failedEvent = orderEventRepository.findById(failedEventId).orElseThrow();
+		failedEvent.markPublishFailed(0, Duration.ZERO, LocalDateTime.of(2026, 7, 20, 10, 0), "kafka unavailable");
+		assertThat(failedEvent.getStatus()).isEqualTo(OrderEventStatus.FAILED);
+		orderEventRepository.saveAndFlush(failedEvent);
+		when(redisTemplate.execute(any(), any(), any(Object[].class))).thenAnswer(invocation -> {
+			org.springframework.data.redis.core.script.RedisScript<?> script = invocation.getArgument(0);
+			if (String.class.equals(script.getResultType())) {
+				return "DATA|1|1|" + americano.getId() + "=1;|||;|||;|||;|||;|||;|||";
+			}
+			return 1L;
+		});
+		when(valueOperations.setIfAbsent(any(), any(), any(Duration.class))).thenReturn(false);
+
+		// when
+		List<PopularMenuRanking> rankings = popularMenuRankingService.getPopularMenuRankings();
+
+		// then
+		assertThat(rankings).containsExactly(
+			new PopularMenuRanking(americano.getId(), 2L),
+			new PopularMenuRanking(latte.getId(), 1L)
+		);
+		assertThat(orderEventRepository.findById(processingEventId).orElseThrow().getStatus())
+			.isEqualTo(OrderEventStatus.PROCESSING);
+	}
+
 	private Long savePaidOrderAndEvent(Long userId, Long menuId, String idempotencyKey) {
 		User user = userRepository.getReferenceById(userId);
 		Menu menu = menuRepository.getReferenceById(menuId);
-		Order order = orderRepository.saveAndFlush(new Order(user, menu, idempotencyKey, 1, 4_500));
+		Order order = new Order(user, menu, idempotencyKey, 1, 4_500);
+		setOrderedAt(order, LocalDateTime.of(2026, 7, 15, 10, 0));
+		orderRepository.saveAndFlush(order);
 		return orderEventRepository.saveAndFlush(new OrderEvent(order)).getId();
+	}
+
+	private void setOrderedAt(Order order, LocalDateTime orderedAt) {
+		try {
+			java.lang.reflect.Field field = Order.class.getDeclaredField("orderedAt");
+			field.setAccessible(true);
+			field.set(order, orderedAt);
+		} catch (ReflectiveOperationException exception) {
+			throw new IllegalStateException(exception);
+		}
 	}
 
 	@SuppressWarnings("unchecked")

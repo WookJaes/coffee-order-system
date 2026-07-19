@@ -176,6 +176,19 @@ class PopularMenuRankingServiceTest {
 	}
 
 	@Test
+	void Redis_snapshot_연결_예외는_불일치로_바꾸지_않고_그대로_전파한다() {
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.same(readSnapshotScript),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenThrow(new RuntimeException("redis unavailable"));
+
+		assertThatThrownBy(service::getPopularMenuRankings)
+			.isInstanceOf(RuntimeException.class)
+			.hasMessage("redis unavailable");
+	}
+
+	@Test
 	void Redis가_DATA여도_새_PAID_주문이_Consumer에_반영되지_않으면_DB_snapshot으로_응답한다() {
 		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 		when(valueOperations.setIfAbsent(any(), any(), any(Duration.class))).thenReturn(false);

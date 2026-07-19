@@ -110,4 +110,27 @@ class RedisRankingAggregationRedisIntegrationTest {
 			RedisRankingKey.dailyRanking(java.time.LocalDate.of(2026, 7, 15)), "7"
 		)).isNull();
 	}
+
+	@Test
+	void 처리_건수_키가_비정상이면_마커와_점수와_상태를_부분_반영하지_않는다() {
+		// given
+		OrderPaidEvent event = new OrderPaidEvent(42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0));
+		java.time.LocalDate date = java.time.LocalDate.of(2026, 7, 15);
+		String countKey = RedisRankingKey.dailyProcessedOrderCount(date);
+		String rankingKey = RedisRankingKey.dailyRanking(date);
+		String statusKey = RedisRankingKey.dailyStatus(date);
+		String processedKey = RedisRankingKey.processedEvent(event.eventId());
+		redisTemplate.opsForValue().set(countKey, "1.5");
+
+		// when
+		assertThatThrownBy(() -> service.aggregate(event))
+			.isInstanceOf(IllegalStateException.class)
+			.hasMessage("랭킹 Redis 집계 키 형식이 올바르지 않습니다.");
+
+		// then
+		assertThat(redisTemplate.opsForValue().get(countKey)).isEqualTo("1.5");
+		assertThat(redisTemplate.hasKey(processedKey)).isFalse();
+		assertThat(redisTemplate.opsForZSet().score(rankingKey, "7")).isNull();
+		assertThat(redisTemplate.opsForValue().get(statusKey)).isNull();
+	}
 }

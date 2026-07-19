@@ -41,7 +41,7 @@ class OrderRepositoryTest {
 		User user = userRepository.save(new User("랭킹 사용자"));
 		Menu americano = menuRepository.save(new Menu("아메리카노", 4_500, MenuStatus.ACTIVE));
 		Menu latte = menuRepository.save(new Menu("카페라떼", 5_000, MenuStatus.ACTIVE));
-		orderRepository.save(createOrder(user, americano, "ranking-1", LocalDateTime.of(2026, 7, 15, 9, 0)));
+		orderRepository.save(createOrder(user, americano, "ranking-1", 3, LocalDateTime.of(2026, 7, 15, 9, 0)));
 		orderRepository.save(createOrder(user, americano, "ranking-2", LocalDateTime.of(2026, 7, 15, 10, 0)));
 		orderRepository.save(createOrder(user, latte, "ranking-3", LocalDateTime.of(2026, 7, 14, 12, 0)));
 		orderRepository.save(createOrder(user, latte, "ranking-old", LocalDateTime.of(2026, 7, 8, 23, 59)));
@@ -68,7 +68,11 @@ class OrderRepositoryTest {
 	}
 
 	private Order createOrder(User user, Menu menu, String idempotencyKey, LocalDateTime orderedAt) {
-		Order order = new Order(user, menu, idempotencyKey, 1, menu.getPrice());
+		return createOrder(user, menu, idempotencyKey, 1, orderedAt);
+	}
+
+	private Order createOrder(User user, Menu menu, String idempotencyKey, int quantity, LocalDateTime orderedAt) {
+		Order order = new Order(user, menu, idempotencyKey, quantity, menu.getPrice() * quantity);
 		try {
 			Field field = Order.class.getDeclaredField("orderedAt");
 			field.setAccessible(true);

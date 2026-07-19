@@ -19,6 +19,9 @@ public record RankingRedisProperties(
 		if (keyTtl == null || keyTtl.isZero() || keyTtl.isNegative()) {
 			throw new IllegalArgumentException("랭킹 Redis 키 TTL은 0보다 커야 합니다.");
 		}
+		if (keyTtl.compareTo(Duration.ofSeconds(1)) < 0) {
+			throw new IllegalArgumentException("랭킹 Redis 키 TTL은 1초 이상이어야 합니다.");
+		}
 		if (rebuildLockTtl == null || rebuildLockTtl.isZero() || rebuildLockTtl.isNegative()) {
 			throw new IllegalArgumentException("랭킹 Redis 재구성 잠금 TTL은 0보다 커야 합니다.");
 		}

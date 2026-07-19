@@ -65,6 +65,8 @@ class RankingRedisConfigTest {
 			new RankingRedisProperties(keyTtl, lockTtl, lockTtl);
 		org.assertj.core.api.ThrowableAssert.ThrowingCallable subSecondTtl = () ->
 			new RankingRedisProperties(keyTtl, Duration.ofMillis(500), Duration.ofMillis(100));
+		org.assertj.core.api.ThrowableAssert.ThrowingCallable subSecondKeyTtl = () ->
+			new RankingRedisProperties(Duration.ofMillis(500), lockTtl, Duration.ofSeconds(1));
 		org.assertj.core.api.ThrowableAssert.ThrowingCallable subSecondInterval = () ->
 			new RankingRedisProperties(keyTtl, lockTtl, Duration.ofMillis(500));
 
@@ -72,6 +74,7 @@ class RankingRedisConfigTest {
 		assertThatThrownBy(zeroInterval).isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(equalInterval).isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(subSecondTtl).isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(subSecondKeyTtl).isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(subSecondInterval).isInstanceOf(IllegalArgumentException.class);
 	}
 }

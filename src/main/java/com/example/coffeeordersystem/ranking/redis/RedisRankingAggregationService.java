@@ -50,6 +50,9 @@ public class RedisRankingAggregationService {
 		if (Long.valueOf(-1L).equals(result)) {
 			throw new RankingRebuildInProgressException();
 		}
+		if (Long.valueOf(-2L).equals(result)) {
+			throw new IllegalStateException("랭킹 Redis 집계 키 형식이 올바르지 않습니다.");
+		}
 		return Long.valueOf(1L).equals(result);
 	}
 }
