@@ -66,3 +66,16 @@ ranking:
     key-ttl: ${RANKING_REDIS_KEY_TTL}
     rebuild-lock-ttl: ${RANKING_REDIS_REBUILD_LOCK_TTL}
     rebuild-lock-renew-interval: ${RANKING_REDIS_REBUILD_LOCK_RENEW_INTERVAL}
+
+data-platform:
+  api-url: ${DATA_PLATFORM_API_URL}
+  connect-timeout: ${DATA_PLATFORM_CONNECT_TIMEOUT}
+  read-timeout: ${DATA_PLATFORM_READ_TIMEOUT}
+  consumer:
+    enabled: ${DATA_PLATFORM_CONSUMER_ENABLED}
+    topic: ${DATA_PLATFORM_CONSUMER_TOPIC}
+    group-id: ${DATA_PLATFORM_CONSUMER_GROUP_ID}
+    dlt-topic: ${DATA_PLATFORM_CONSUMER_DLT_TOPIC}
+    max-retry-attempts: ${DATA_PLATFORM_CONSUMER_MAX_RETRY_ATTEMPTS}
+    retry-backoff: ${DATA_PLATFORM_CONSUMER_RETRY_BACKOFF}
+    concurrency: ${DATA_PLATFORM_CONSUMER_CONCURRENCY}

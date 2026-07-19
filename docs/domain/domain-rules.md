@@ -50,6 +50,7 @@
 - Consumer는 Redis Lua 원자 연산으로 중복 마커 등록, 날짜별 ZSET 주문 수 증가, 일자별 처리 주문 건수 증가, `DATA` 상태 기록과 관련 키 TTL 설정을 함께 처리한다. 키는 `coffee:ranking:processed:{eventId}`, `coffee:ranking:{yyyy-MM-dd}`, `coffee:ranking:count:{yyyy-MM-dd}`, `coffee:ranking:status:{yyyy-MM-dd}`다.
 - 이미 처리된 eventId는 메뉴 점수와 일자별 처리 주문 건수를 모두 증가시키지 않는다.
 - Redis 처리 실패는 Consumer 예외로 전파해 Kafka 재시도·DLT 정책을 적용한다.
+- 데이터 플랫폼 Consumer는 랭킹과 다른 Consumer Group에서 `OrderPaidEvent`를 소비한다. `eventId`, `userId`, `menuId`, `paymentAmount`를 HTTP로 전송하고 `eventId`에서 만든 `Idempotency-Key: order-paid:{eventId}`를 제공한다. HTTP 2xx만 성공이며 4xx는 즉시 전용 DLT, 연결 실패·timeout·5xx는 설정 횟수 재시도 뒤 전용 DLT로 보낸다. 성공 응답과 offset 기록 사이의 중단으로 요청이 재전송될 수 있으므로 수신 측은 같은 키를 하나의 논리 이벤트로 처리해야 한다.
 - 최근 7일 랭킹의 동점은 메뉴 ID 오름차순으로 결정한다.
 - 인기 메뉴 조회는 현재 `ACTIVE` 메뉴만 반환하며, 랭킹에 남은 `SOLD_OUT` 또는 삭제 메뉴는 건너뛰고 다음 메뉴로 최대 3건을 채운다.
 - 기간은 Asia/Seoul 기준 요청일을 포함한 7개 달력일이며, DB 집계 범위는 시작일 00:00 이상·요청 다음 날 00:00 미만이다. `PAID` 주문만 포함하고 주문 `quantity`가 아니라 주문 1건을 1회로 집계한다.

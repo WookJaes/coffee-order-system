@@ -27,6 +27,7 @@
 - Kafka `send()` 호출 자체 또는 발행 완료가 `processingTimeout`을 넘어도 유효한 Publisher의 현재 이벤트와 같은 선점 토큰의 배치 대기 이벤트 lease가 함께 갱신되어 다른 Publisher가 회수·재선점·재발행하지 않는지, 두 Publisher의 같은 이벤트 동시 선점 방지와 lease 갱신이 멈춘 오래된 `PROCESSING` 회복
 - Kafka send executor 거절 또는 작업 미시작 시 Kafka 호출 없이 기존 backoff·재시도 경로로 전환하는지 확인
 - Kafka 중복 메시지, Redis 갱신 실패 후 DLT 이동
+- Embedded Kafka와 Mock HTTP Server에서 데이터 플랫폼 Consumer의 payload·`Idempotency-Key`·2xx 단일 호출·동일 이벤트 논리 단건 수집, timeout/5xx의 설정 횟수 재시도와 원본 이벤트 전용 DLT, 4xx 즉시 DLT, 랭킹 Consumer 독립 처리를 검증한다.
 - Redis Lua 집계의 날짜별 키·TTL·메뉴 주문 수 증가와 같은 `eventId`의 중복 무증가, 자정 경계·지연 소비에도 이벤트 주문 시각의 Asia/Seoul 날짜 키 선택. `orderedAt`이 없는 이전 Kafka 메시지는 주문 원장으로 시각을 보완한다.
 - 새 eventId 한 번의 Lua 연산에서 중복 마커·ZSET 점수·일자별 처리 주문 건수·`DATA` 상태·TTL이 함께 기록되고, 동일 eventId 재소비에서 ZSET과 처리 건수가 모두 한 번만 증가하는지 확인한다.
 - `DATA`/`EMPTY` 상태 뒤 Consumer가 아직 처리하지 않은 새 `PAID` 주문, Outbox `PENDING/PROCESSING/FAILED`, Kafka 재시도·DLT 지연으로 Redis가 뒤처진 경우 DB 원장 snapshot 응답이 누락되지 않는지 확인한다.

@@ -98,7 +98,7 @@ Optional<Point> findByUserIdWithPessimisticLock(Long userId);
 -> order_events에 PENDING 이벤트 저장
 -> Outbox Publisher가 Kafka topic(order-paid)에 주문 완료 이벤트 발행
 -> product-ranking-group: Redis ZSET에 메뉴별 주문 수 누적
--> payment-history-group: 결제/주문 히스토리 저장 또는 검증
+-> data-platform-group: Mock 데이터 플랫폼 HTTP API에 주문 완료 정보 전달
 ```
 
 주문 트랜잭션 안에서 Kafka를 직접 호출하면 Kafka 장애가 주문 실패로 전파될 수 있다. 반대로 주문 저장 후 Kafka 발행만 수행하다가 실패하면 주문 데이터가 수집 플랫폼으로 전달되지 않고 유실될 수 있다.
@@ -108,6 +108,8 @@ Optional<Point> findByUserIdWithPessimisticLock(Long userId);
 발행 메시지는 `eventId`, `orderId`, `userId`, `menuId`, `paymentAmount`, `orderedAt` JSON 필드를 가진다. `orderedAt`은 `orders.ordered_at`의 실제 주문 시각이며, Kafka 발행 지연이나 재전달에도 Consumer가 주문일 키를 선택하는 기준이다. 이전 형식 메시지처럼 이 필드가 없으면 Consumer는 `orderId`로 주문 원장을 조회해 주문 시각을 보완한다. Kafka 메시지 키는 주문 단위 순서를 위한 `orderId` 문자열이다. 기본 토픽은 `order-paid`이고 `OUTBOX_TOPIC`, `OUTBOX_PUBLISHER_FIXED_DELAY`, `OUTBOX_PUBLISHER_BATCH_SIZE`, `OUTBOX_PUBLISHER_MAX_RETRY_COUNT`, `OUTBOX_PUBLISHER_RETRY_BACKOFF`, `OUTBOX_PUBLISHER_PROCESSING_TIMEOUT`으로 운영 환경에서 조정한다.
 
 Kafka Consumer는 기본적으로 at-least-once 방식으로 동작하므로 같은 메시지가 두 번 이상 처리될 수 있다. 따라서 DB에 저장되는 중요한 데이터는 `orderId` 또는 이벤트 ID 기준으로 멱등 처리한다. 반복 재시도 후에도 처리하지 못한 메시지는 DLT(Dead Letter Topic)로 이동시켜 운영자가 원인을 확인하고 재처리할 수 있도록 한다.
+
+데이터 플랫폼 Consumer는 `data-platform-group`으로 같은 `order-paid` 토픽을 랭킹 Consumer와 독립적으로 소비한다. HTTP 요청 본문에는 `eventId`, `userId`, `menuId`, `paymentAmount`를 넣고 `Idempotency-Key: order-paid:{eventId}`를 함께 보낸다. HTTP 2xx만 성공이며, 연결 실패·timeout·5xx는 `DATA_PLATFORM_CONSUMER_MAX_RETRY_ATTEMPTS`만큼 재시도한 뒤 `DATA_PLATFORM_CONSUMER_DLT_TOPIC`으로 보낸다. 4xx는 재시도하지 않는다. HTTP 성공 뒤 offset 기록 전 중단되면 같은 요청이 다시 전송될 수 있으므로 수신 플랫폼은 이 키로 논리적 단건 수집을 보장해야 한다.
 
 ### 2.6 인기 메뉴 조회 전략
 
