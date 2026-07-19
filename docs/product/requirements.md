@@ -15,6 +15,7 @@
 - 주문, 포인트 사용 이력, Outbox 이벤트 저장은 하나의 트랜잭션으로 처리한다.
 - 주문 API의 `Idempotency-Key`는 필수·공백 불가·최대 100자이며, 지원하지 않는 HTTP 메서드와 Content-Type 및 예상하지 못한 예외는 각각 일관된 405·415·내부 상세 없는 500 공통 오류 응답으로 처리한다.
 - Kafka Consumer는 중복 메시지를 안전하게 처리하고 반복 실패 메시지는 DLT로 이동한다. Redis 일자별 랭킹은 Consumer 처리 시각이 아니라 주문의 실제 `ordered_at`을 Asia/Seoul 날짜로 변환한 값에 집계한다.
+- 데이터 수집 플랫폼 전달은 랭킹과 독립된 Consumer Group에서 수행하며, HTTP 2xx만 성공으로 처리한다. 수신 플랫폼은 이벤트 ID 기반 멱등 키를 사용해 Kafka at-least-once 재전송을 한 건으로 반영해야 한다.
 - 인기 메뉴 조회는 Redis를 정상 경로의 주 조회 저장소로 사용하되, `orders`의 `PAID` 주문 건수를 정확성 원장으로 비교한다. 최근 7개 달력일의 Redis ZSET·`DATA/EMPTY` 상태·일자별 처리 주문 건수는 하나의 원자적 snapshot으로 읽고, 하나라도 누락·불일치하면 동일 `REQUIRES_NEW` 읽기 전용 `REPEATABLE_READ` DB snapshot의 결과를 응답한다.
 - 랭킹 Consumer의 새 `eventId` 처리는 중복 마커, 일자별 ZSET, 처리 주문 건수, `DATA` 상태와 TTL을 하나의 Redis Lua 연산으로 기록한다. 같은 이벤트의 재처리는 ZSET과 처리 건수를 모두 증가시키지 않는다.
 - 기능과 제약사항은 테스트로 검증한다.

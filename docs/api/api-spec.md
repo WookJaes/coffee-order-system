@@ -90,6 +90,7 @@ Idempotency-Key: 4de91f71-4c2d-4eb9-bc8e-2b0f4603a1fb
 - `quantity`는 1 이상의 정수다. 결제 금액은 주문 시점 메뉴 가격과 수량의 곱이며, 응답의 `paymentAmount`와 `orders.order_price`에 저장한다.
 - 사용자·메뉴·포인트 정보 없음은 각각 404, 판매 상태가 `ACTIVE`가 아닌 메뉴와 잔액 부족은 400으로 실패한다.
 - 성공 시 주문, 포인트 차감, 사용 이력, `PENDING` Outbox 이벤트가 하나의 트랜잭션으로 저장된다. Kafka 발행은 이 API 범위에 포함하지 않는다.
+- 주문 완료 뒤 데이터 플랫폼 전달은 주문 API 외부의 Kafka Consumer가 수행한다. 외부 요청 계약은 `eventId`, `userId`, `menuId`, `paymentAmount` JSON과 `Idempotency-Key: order-paid:{eventId}` 헤더이며, 주문 API 요청·응답에는 포함하지 않는다.
 
 ### GET /api/menus/popular
 
