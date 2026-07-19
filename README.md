@@ -659,7 +659,7 @@ docker compose up -d
 SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 ```
 
-`local` 프로필은 공통 migration(V1/V2/V4/V5)과 로컬 전용 V3를 함께 적용해 Manual HTTP/Postman 예시의 `userId=1`을 준비한다. 로컬이 아닌 배포 프로필은 공통 migration만 적용하므로, 배포 자동화나 운영 검증에서 `userId=1`을 전제하지 않는다.
+`local` 프로필은 공통 migration(V1/V2/V4/V5/V6)과 로컬 전용 V3를 함께 적용해 Manual HTTP/Postman 예시의 `userId=1`을 준비한다. 로컬이 아닌 배포 프로필은 공통 migration만 적용하므로, 배포 자동화나 운영 검증에서 `userId=1`을 전제하지 않는다.
 
 기동 확인:
 
