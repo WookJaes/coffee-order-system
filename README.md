@@ -563,17 +563,21 @@ Asia/Seoul 기준 요청일을 포함한 최근 7개 달력일의 일자별 Redi
 
 | 상황 | 내부 ErrorCode | HTTP Status | 설명 |
 | --- | --- | --- | --- |
+| 사용자 ID 누락 | INVALID_USER_ID | 400 | 사용자 ID가 필수값이 아님 |
 | 존재하지 않는 사용자 | USER_NOT_FOUND | 404 | 요청한 사용자 ID가 존재하지 않음 |
+| 메뉴 ID 누락 | INVALID_MENU_ID | 400 | 메뉴 ID가 필수값이 아님 |
 | 존재하지 않는 메뉴 | MENU_NOT_FOUND | 404 | 요청한 메뉴 ID가 존재하지 않음 |
 | 판매 중이 아닌 메뉴 | MENU_NOT_ON_SALE | 400 | 품절 또는 숨김 상태 메뉴 |
+| 주문 수량 오류 | INVALID_ORDER_QUANTITY | 400 | 수량이 1 미만이거나 결제 금액이 표현 범위를 초과함 |
 | 충전 금액 오류 | INVALID_CHARGE_AMOUNT | 400 | 충전 금액이 1 미만 또는 100,000 초과 |
 | 포인트 잔액 초과 | POINT_BALANCE_OVERFLOW | 400 | 충전 후 잔액이 `Integer.MAX_VALUE`를 초과함 |
 | 포인트 정보 없음 | POINT_NOT_FOUND | 404 | 주문 시 사용자 포인트 정보가 없음 |
 | 잔액 부족 | INSUFFICIENT_POINT | 400 | 포인트 잔액이 주문 금액보다 작음 |
 | 멱등성 키 누락 | IDEMPOTENCY_KEY_REQUIRED | 400 | 주문 요청에 멱등성 키가 없음 |
+| 멱등성 키 길이 초과 | IDEMPOTENCY_KEY_TOO_LONG | 400 | Idempotency-Key가 100자를 초과함 |
 | 멱등성 키 충돌 | IDEMPOTENCY_KEY_CONFLICT | 409 | 같은 멱등성 키로 다른 요청 내용이 들어옴 |
-| 주문 없음 | ORDER_NOT_FOUND | 404 | 주문 ID가 존재하지 않음 |
-| 외부 전송 실패 | ORDER_EVENT_SEND_FAILED | 500 | 주문 데이터 플랫폼 전송 실패 |
+| Outbox 이벤트 없음 | OUTBOX_EVENT_NOT_FOUND | 404 | 요청한 Outbox 이벤트가 존재하지 않음 |
+| Outbox 이벤트 재처리 불가 | OUTBOX_EVENT_NOT_REPROCESSABLE | 409 | FAILED 상태가 아닌 Outbox 이벤트의 재처리를 요청함 |
 | 서버 내부 오류 | INTERNAL_SERVER_ERROR | 500 | 서버 내부 오류 |
 
 주문 이벤트 전송 실패는 주문 자체를 실패시키지 않는다. 주문 이벤트가 이미 `order_events` 테이블에 저장되어 있다면 재시도 가능한 상태로 관리한다.
@@ -647,14 +651,15 @@ K6를 사용하여 주요 API의 부하를 검증한다.
 
 ### 7.1 애플리케이션 실행
 
-로컬 인프라를 먼저 실행한 뒤 `local` 프로필로 애플리케이션을 실행한다.
+새 clone에서는 먼저 예시 환경 파일을 복사해 `.env`를 준비한다. 실제 환경에 맞게 필요한 값을 조정한 뒤 로컬 인프라와 애플리케이션을 실행한다.
 
 ```bash
+cp .env.example .env
 docker compose up -d
 SPRING_PROFILES_ACTIVE=local ./gradlew bootRun
 ```
 
-`local` 프로필은 공통 migration(V1/V2/V4/V5)과 로컬 전용 V3를 함께 적용해 Manual HTTP/Postman 예시의 `userId=1`을 준비한다. 로컬이 아닌 배포 프로필은 공통 migration만 적용하므로, 배포 자동화나 운영 검증에서 `userId=1`을 전제하지 않는다.
+`local` 프로필은 공통 migration(V1/V2/V4/V5/V6)과 로컬 전용 V3를 함께 적용해 Manual HTTP/Postman 예시의 `userId=1`을 준비한다. 로컬이 아닌 배포 프로필은 공통 migration만 적용하므로, 배포 자동화나 운영 검증에서 `userId=1`을 전제하지 않는다.
 
 기동 확인:
 
@@ -686,7 +691,7 @@ docker compose down
 ### 7.4 K6 성능 테스트 실행
 
 ```bash
-k6 run k6/order-load-test.js
+k6 run k6/order-load.js
 ```
 
 ### 7.5 API 호출 예시

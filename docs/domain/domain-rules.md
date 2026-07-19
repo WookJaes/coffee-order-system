@@ -14,6 +14,7 @@
 - 충전 시 `points` row가 없으면 생성한다.
 - 주문 시 `points` row가 없으면 `POINT_NOT_FOUND`로 실패한다.
 - 충전과 사용은 `point_histories`에 잔액 변동 후 값을 남긴다.
+- `CHARGE` 이력은 `order_id`가 없고, `USE` 이력은 반드시 주문과 연결된다. DB `CHECK` 제약과 nullable `order_id`의 유니크 제약은 서비스 코드 실수나 수동 데이터 조작으로 이 원장 관계가 훼손되는 것을 방지하며, 한 주문에는 `USE` 이력이 최대 한 건만 저장된다.
 - 충전과 주문 결제는 모두 같은 사용자의 `users` row를 `PESSIMISTIC_WRITE`로 먼저 잠근 뒤, 기존 `points` row를 `PESSIMISTIC_WRITE`로 조회·변경한다. 공통 잠금 순서는 `users -> points`다. 포인트가 없는 충전은 사용자 잠금 아래 새 row를 생성하고, 주문은 `POINT_NOT_FOUND`로 실패한다.
 
 ## 환경별 테스트 사용자 Seed

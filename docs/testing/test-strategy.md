@@ -14,6 +14,7 @@
 - 포인트 충전 성공, 0 이하 충전 실패, 동시 충전, `Integer.MAX_VALUE` 경계 충전 성공
 - 최대 잔액 초과 충전의 `POINT_BALANCE_OVERFLOW`·HTTP 400, 잔액·`CHARGE` 이력 무변경 및 실제 MySQL 동시 충전의 상한 유지
 - 포인트가 없는 사용자 동시 충전 시 `points` 한 건 생성과 `CHARGE` 이력 합계 정합성
+- 실제 MySQL에서 `CHARGE`의 `order_id IS NULL`, `USE`의 `order_id IS NOT NULL`, 주문당 `USE` 이력 최대 한 건을 DB 제약으로 검증하고, nullable 유니크 인덱스가 여러 `CHARGE` 이력을 허용하는지 확인
 - 메뉴 없음, 품절 메뉴, 포인트 없음, 잔액 부족, 1 미만 수량
 - 수량별 총 결제금액과 포인트 사용 이력·Outbox 금액 정합성
 - 같은 멱등성 키 재시도(이후 포인트 변동에도 최초 응답 유지), 같은 키의 다른 요청
