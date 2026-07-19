@@ -12,7 +12,6 @@ final class LegacyV3MigrationStrategy {
 
 	MigrateResult migrate(Flyway flyway) {
 		Flyway migrationFlyway = migrationFlyway(flyway);
-		migrationFlyway.validate();
 		return migrationFlyway.migrate();
 	}
 
