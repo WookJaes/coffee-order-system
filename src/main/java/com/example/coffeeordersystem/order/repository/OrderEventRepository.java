@@ -67,6 +67,8 @@ public interface OrderEventRepository extends JpaRepository<OrderEvent, Long> {
 	@Query("select e from OrderEvent e where e.id = :eventId")
 	Optional<OrderEvent> findByIdForUpdate(@Param("eventId") Long eventId);
 
+	long countByStatus(OrderEventStatus status);
+
 	@Query("""
 		select new com.example.coffeeordersystem.ranking.dto.RebuildOrderEvent(
 			e.id
