@@ -21,6 +21,10 @@ public enum ErrorCode {
 	IDEMPOTENCY_KEY_TOO_LONG(HttpStatus.BAD_REQUEST, "Idempotency-Key 헤더는 100자 이하여야 합니다."),
 	IDEMPOTENCY_KEY_CONFLICT(HttpStatus.CONFLICT, "동일한 멱등성 키로 다른 메뉴를 주문할 수 없습니다."),
 
+	// outbox
+	OUTBOX_EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "Outbox 이벤트를 찾을 수 없습니다."),
+	OUTBOX_EVENT_NOT_REPROCESSABLE(HttpStatus.CONFLICT, "FAILED 상태의 Outbox 이벤트만 재처리할 수 있습니다."),
+
 	INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다.");
 
 	private final HttpStatus status;
