@@ -94,6 +94,25 @@ class EnvironmentSeedFlywayIntegrationTest {
 			.hasMessageContaining("Detected applied migration not resolved locally");
 	}
 
+	@Test
+	void 기존_V5_DB는_pending_V6를_migrate로_적용한다() throws Exception {
+		// given
+		Flyway.configure()
+			.dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
+			.locations("classpath:db/migration")
+			.target("5")
+			.load()
+			.migrate();
+		Flyway pendingV6Flyway = flyway("classpath:db/migration");
+
+		// when
+		var migrationResult = new LegacyV3MigrationStrategy().migrate(pendingV6Flyway);
+
+		// then
+		assertThat(migrationResult.migrationsExecuted).isEqualTo(1);
+		assertThat(queryForInt("select count(*) from flyway_schema_history where version = '6'")).isEqualTo(1);
+	}
+
 	private Flyway flyway(String... locations) {
 		return Flyway.configure()
 			.dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
