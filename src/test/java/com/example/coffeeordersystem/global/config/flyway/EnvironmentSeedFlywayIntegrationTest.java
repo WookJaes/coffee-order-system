@@ -42,8 +42,8 @@ class EnvironmentSeedFlywayIntegrationTest {
 		// then
 		assertThat(queryForInt("select count(*) from users where id = 1")).isEqualTo(1);
 		assertThat(queryForInt("select count(*) from menus")).isEqualTo(5);
-		assertThat(queryForInt("select count(*) from flyway_schema_history where version in ('1', '2', '3', '4', '5')"))
-			.isEqualTo(5);
+		assertThat(queryForInt("select count(*) from flyway_schema_history where version in ('1', '2', '3', '4', '5', '6')"))
+			.isEqualTo(6);
 	}
 
 	@Test
@@ -57,8 +57,8 @@ class EnvironmentSeedFlywayIntegrationTest {
 		// then
 		assertThat(queryForInt("select count(*) from users where id = 1")).isZero();
 		assertThat(queryForInt("select count(*) from menus")).isEqualTo(5);
-		assertThat(queryForInt("select count(*) from flyway_schema_history where version in ('1', '2', '4', '5')"))
-			.isEqualTo(4);
+		assertThat(queryForInt("select count(*) from flyway_schema_history where version in ('1', '2', '4', '5', '6')"))
+			.isEqualTo(5);
 		assertThat(queryForInt("select count(*) from flyway_schema_history where version = '3'")).isZero();
 	}
 
