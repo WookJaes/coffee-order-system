@@ -88,6 +88,10 @@ class RedisRankingAggregationRedisIntegrationTest {
 		)).isNull();
 		assertThat(redisTemplate.getExpire(rankingKey)).isPositive().isLessThanOrEqualTo(KEY_TTL.getSeconds());
 		assertThat(redisTemplate.getExpire(processedKey)).isPositive().isLessThanOrEqualTo(KEY_TTL.getSeconds());
+		String dailyCountKey = RedisRankingKey.dailyProcessedOrderCount(java.time.LocalDate.of(2026, 7, 14));
+		String dailyStatusKey = RedisRankingKey.dailyStatus(java.time.LocalDate.of(2026, 7, 14));
+		assertThat(redisTemplate.getExpire(dailyCountKey)).isPositive().isLessThanOrEqualTo(KEY_TTL.getSeconds());
+		assertThat(redisTemplate.getExpire(dailyStatusKey)).isPositive().isLessThanOrEqualTo(KEY_TTL.getSeconds());
 	}
 
 	@Test

@@ -130,6 +130,49 @@ class PopularMenuRankingServiceTest {
 		verify(orderRepository).findDailyPaidMenuOrderCounts(start.capture(), end.capture());
 		assertThat(start.getValue()).isEqualTo(LocalDateTime.of(2026, 7, 9, 0, 0));
 		assertThat(end.getValue()).isEqualTo(LocalDateTime.of(2026, 7, 16, 0, 0));
+		verify(valueOperations, org.mockito.Mockito.never()).setIfAbsent(any(), any(), any(Duration.class));
+	}
+
+	@Test
+	void 일자별_총합이_같아도_메뉴별_Redis_점수가_원장과_다르면_DB_결과를_반환한다() {
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.setIfAbsent(any(), any(), any(Duration.class))).thenReturn(false);
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 1L, 2L),
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 2L, 1L)
+		));
+		stubReadSnapshot("DATA|3|1|1=1,2=2", "|||", "|||", "|||", "|||", "|||", "|||");
+
+		assertThat(service.getPopularMenuRankings()).containsExactly(
+			new PopularMenuRanking(1L, 2L),
+			new PopularMenuRanking(2L, 1L)
+		);
+	}
+
+	@Test
+	void malformed_Redis_snapshot은_예외를_내지_않고_DB_결과로_전환한다() {
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.setIfAbsent(any(), any(), any(Duration.class))).thenReturn(false);
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 7L, 2L)
+		));
+		stubReadSnapshot("DATA|1|1|7=1.5", "|||", "|||", "|||", "|||", "|||", "|||");
+
+		assertThat(service.getPopularMenuRankings())
+			.containsExactly(new PopularMenuRanking(7L, 2L));
+	}
+
+	@Test
+	void 숫자가_아닌_Redis_processed_count도_DB_결과로_전환한다() {
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.setIfAbsent(any(), any(), any(Duration.class))).thenReturn(false);
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 7L, 2L)
+		));
+		stubReadSnapshot("DATA|not-a-count|1|7=1", "|||", "|||", "|||", "|||", "|||", "|||");
+
+		assertThat(service.getPopularMenuRankings())
+			.containsExactly(new PopularMenuRanking(7L, 2L));
 	}
 
 	@Test

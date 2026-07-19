@@ -89,7 +89,7 @@ public class PopularMenuRankingService {
 		LocalDateTime end = today.plusDays(1).atStartOfDay();
 		RedisRankingSnapshot redisSnapshot = readRedisSnapshot(today);
 		LedgerSnapshot ledger = buildLedgerSnapshot(today, orderRepository.findDailyPaidMenuOrderCounts(start, end));
-		if (redisSnapshot.matches(today, ledger.dailyCounts())) {
+		if (redisSnapshot.matches(today, ledger.dailyCounts(), ledger.dailyMenuCounts())) {
 			return toTopRankings(redisSnapshot.orderCounts());
 		}
 		return toTopRankings(recoverRankings(today, start, end, ledger));
@@ -97,16 +97,21 @@ public class PopularMenuRankingService {
 
 	private LedgerSnapshot buildLedgerSnapshot(LocalDate today, List<DailyMenuOrderCount> dailyRows) {
 		Map<LocalDate, Long> dailyCounts = new HashMap<>();
+		Map<LocalDate, Map<Long, Long>> dailyMenuCounts = new HashMap<>();
 		Map<Long, Long> totals = new HashMap<>();
 		for (int offset = 0; offset < RANKING_DAYS; offset++) {
-			dailyCounts.put(today.minusDays(offset), 0L);
+			LocalDate date = today.minusDays(offset);
+			dailyCounts.put(date, 0L);
+			dailyMenuCounts.put(date, new HashMap<>());
 		}
 		for (DailyMenuOrderCount dailyRow : dailyRows) {
 			LocalDate date = toLocalDate(dailyRow.orderedDate());
 			dailyCounts.merge(date, dailyRow.orderCount(), Long::sum);
+			dailyMenuCounts.computeIfAbsent(date, ignored -> new HashMap<>())
+				.merge(dailyRow.menuId(), dailyRow.orderCount(), Long::sum);
 			totals.merge(dailyRow.menuId(), dailyRow.orderCount(), Long::sum);
 		}
-		return new LedgerSnapshot(dailyRows, dailyCounts, totals);
+		return new LedgerSnapshot(dailyRows, dailyCounts, dailyMenuCounts, totals);
 	}
 
 	private RedisRankingSnapshot readRedisSnapshot(LocalDate today) {
@@ -119,46 +124,71 @@ public class PopularMenuRankingService {
 		}
 		String encoded = redisTemplate.execute(readSnapshotScript, keys, new Object[0]);
 		if (encoded == null) {
-			throw new IllegalStateException("랭킹 Redis snapshot을 읽을 수 없습니다.");
+			return RedisRankingSnapshot.invalid();
 		}
 
 		String[] dailySnapshots = encoded.split(";", -1);
 		if (dailySnapshots.length != RANKING_DAYS) {
-			throw new IllegalStateException("랭킹 Redis snapshot 형식이 올바르지 않습니다.");
+			return RedisRankingSnapshot.invalid();
 		}
 		Map<LocalDate, RedisDailySnapshot> snapshots = new HashMap<>();
 		Map<Long, Long> orderCounts = new HashMap<>();
-		for (int offset = 0; offset < RANKING_DAYS; offset++) {
-			LocalDate date = today.minusDays(offset);
-			RedisDailySnapshot dailySnapshot = parseDailySnapshot(dailySnapshots[offset]);
-			snapshots.put(date, dailySnapshot);
-			dailySnapshot.orderCounts().forEach((menuId, count) -> orderCounts.merge(menuId, count, Long::sum));
+		try {
+			for (int offset = 0; offset < RANKING_DAYS; offset++) {
+				LocalDate date = today.minusDays(offset);
+				RedisDailySnapshot dailySnapshot = parseDailySnapshot(dailySnapshots[offset]);
+				snapshots.put(date, dailySnapshot);
+				dailySnapshot.orderCounts().forEach((menuId, count) -> orderCounts.merge(menuId, count, Long::sum));
+			}
+		} catch (InvalidRedisSnapshotException exception) {
+			return RedisRankingSnapshot.invalid();
 		}
-		return new RedisRankingSnapshot(snapshots, orderCounts);
+		return new RedisRankingSnapshot(true, snapshots, orderCounts);
 	}
 
 	private RedisDailySnapshot parseDailySnapshot(String encoded) {
 		String[] fields = encoded.split("\\|", -1);
 		if (fields.length != 4) {
-			throw new IllegalStateException("랭킹 Redis 일자 snapshot 형식이 올바르지 않습니다.");
+			throw new InvalidRedisSnapshotException("랭킹 Redis 일자 snapshot 형식이 올바르지 않습니다.");
 		}
 		Map<Long, Long> orderCounts = new HashMap<>();
-		if (!fields[3].isEmpty()) {
-			for (String entry : fields[3].split(",", -1)) {
-				String[] memberAndScore = entry.split("=", -1);
-				if (memberAndScore.length != 2) {
-					throw new IllegalStateException("랭킹 Redis ZSET snapshot 형식이 올바르지 않습니다.");
+		try {
+			if (!fields[3].isEmpty()) {
+				for (String entry : fields[3].split(",", -1)) {
+					String[] memberAndScore = entry.split("=", -1);
+					if (memberAndScore.length != 2) {
+						throw new InvalidRedisSnapshotException("랭킹 Redis ZSET snapshot 형식이 올바르지 않습니다.");
+					}
+					Long menuId = Long.valueOf(memberAndScore[0]);
+					Long count = parseIntegralCount(memberAndScore[1]);
+					if (orderCounts.put(menuId, count) != null) {
+						throw new InvalidRedisSnapshotException("랭킹 Redis ZSET snapshot에 중복 메뉴가 있습니다.");
+					}
 				}
-				orderCounts.put(Long.parseLong(memberAndScore[0]), Double.valueOf(memberAndScore[1]).longValue());
 			}
+		} catch (NumberFormatException exception) {
+			throw new InvalidRedisSnapshotException("랭킹 Redis ZSET snapshot 숫자 형식이 올바르지 않습니다.", exception);
 		}
-		Long processedCount = fields[1].isEmpty() ? null : Long.valueOf(fields[1]);
+		Long processedCount = fields[1].isEmpty() ? null : parseIntegralCount(fields[1]);
 		return new RedisDailySnapshot(
 			fields[0].isEmpty() ? null : fields[0],
 			processedCount,
 			"1".equals(fields[2]),
 			orderCounts
 		);
+	}
+
+	private Long parseIntegralCount(String value) {
+		double parsed;
+		try {
+			parsed = Double.parseDouble(value);
+		} catch (NumberFormatException exception) {
+			throw new InvalidRedisSnapshotException("랭킹 Redis count 숫자 형식이 올바르지 않습니다.", exception);
+		}
+		if (!Double.isFinite(parsed) || parsed < 0 || parsed != Math.rint(parsed) || parsed > Long.MAX_VALUE) {
+			throw new InvalidRedisSnapshotException("랭킹 Redis count는 음이 아닌 정수여야 합니다.");
+		}
+		return (long) parsed;
 	}
 
 	private Map<Long, Long> recoverRankings(
@@ -180,7 +210,7 @@ public class PopularMenuRankingService {
 		ScheduledFuture<?> leaseRenewal = startLeaseRenewal(lockToken, ownershipLost);
 		try {
 			RedisRankingSnapshot currentRankings = readRedisSnapshot(today);
-			if (currentRankings.matches(today, ledger.dailyCounts())) {
+			if (currentRankings.matches(today, ledger.dailyCounts(), ledger.dailyMenuCounts())) {
 				return currentRankings.orderCounts();
 			}
 
@@ -320,25 +350,38 @@ public class PopularMenuRankingService {
 	private record LedgerSnapshot(
 		List<DailyMenuOrderCount> dailyRows,
 		Map<LocalDate, Long> dailyCounts,
+		Map<LocalDate, Map<Long, Long>> dailyMenuCounts,
 		Map<Long, Long> totals
 	) {
 	}
 
 	private record RedisRankingSnapshot(
+		boolean valid,
 		Map<LocalDate, RedisDailySnapshot> dailySnapshots,
 		Map<Long, Long> orderCounts
 	) {
 
-		private boolean matches(LocalDate today, Map<LocalDate, Long> expectedDailyCounts) {
+		private static RedisRankingSnapshot invalid() {
+			return new RedisRankingSnapshot(false, Map.of(), Map.of());
+		}
+
+		private boolean matches(
+			LocalDate today,
+			Map<LocalDate, Long> expectedDailyCounts,
+			Map<LocalDate, Map<Long, Long>> expectedDailyMenuCounts
+		) {
+			if (!valid) {
+				return false;
+			}
 			for (int offset = 0; offset < RANKING_DAYS; offset++) {
 				LocalDate date = today.minusDays(offset);
 				RedisDailySnapshot snapshot = dailySnapshots.get(date);
 				long expected = expectedDailyCounts.getOrDefault(date, 0L);
+				Map<Long, Long> expectedMenuCounts = expectedDailyMenuCounts.getOrDefault(date, Map.of());
 				if (snapshot == null || snapshot.processedCount() == null || snapshot.processedCount() != expected) {
 					return false;
 				}
-				long zsetTotal = snapshot.orderCounts().values().stream().mapToLong(Long::longValue).sum();
-				if (zsetTotal != expected) {
+				if (!snapshot.orderCounts().equals(expectedMenuCounts)) {
 					return false;
 				}
 				if (expected > 0L && (!DATA_STATUS.equals(snapshot.status()) || !snapshot.rankingExists())) {
@@ -349,6 +392,17 @@ public class PopularMenuRankingService {
 				}
 			}
 			return true;
+		}
+	}
+
+	private static final class InvalidRedisSnapshotException extends RuntimeException {
+
+		private InvalidRedisSnapshotException(String message) {
+			super(message);
+		}
+
+		private InvalidRedisSnapshotException(String message, Throwable cause) {
+			super(message, cause);
 		}
 	}
 
