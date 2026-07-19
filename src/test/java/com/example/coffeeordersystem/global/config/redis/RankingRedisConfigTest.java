@@ -23,7 +23,21 @@ class RankingRedisConfigTest {
 
 		// then
 		assertThat(aggregationService).isNotNull();
-		assertThat(script.getScriptAsString()).contains("ZINCRBY");
+		assertThat(script.getScriptAsString())
+			.contains("ZINCRBY", "INCRBY", "KEYS[4]", "KEYS[5]");
+	}
+
+	@Test
+	void Redis_7일_snapshot_Lua는_상태_count와_ZSET을_함께_읽는다() {
+		// given
+		RankingRedisConfig config = new RankingRedisConfig(new RankingRedisProperties(Duration.ofDays(8), Duration.ofMinutes(1), Duration.ofSeconds(20)));
+
+		// when
+		RedisScript<String> script = config.rankingReadSnapshotScript();
+
+		// then
+		assertThat(script.getScriptAsString())
+			.contains("GET", "EXISTS", "ZRANGE", "WITHSCORES");
 	}
 
 	@Test

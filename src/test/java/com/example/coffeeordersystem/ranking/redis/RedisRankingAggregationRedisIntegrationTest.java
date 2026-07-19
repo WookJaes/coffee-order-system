@@ -14,6 +14,8 @@ import java.time.ZoneId;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -24,6 +26,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers(disabledWithoutDocker = true)
+@Execution(ExecutionMode.SAME_THREAD)
 class RedisRankingAggregationRedisIntegrationTest {
 
 	@Container
@@ -42,6 +45,7 @@ class RedisRankingAggregationRedisIntegrationTest {
 		redisTemplate = new StringRedisTemplate(connectionFactory);
 		redisTemplate.afterPropertiesSet();
 		redisTemplate.getConnectionFactory().getConnection().serverCommands().flushDb();
+		redisTemplate.delete(RedisRankingKey.rebuilding());
 
 		DefaultRedisScript<Long> script = new DefaultRedisScript<>();
 		script.setLocation(new ClassPathResource("scripts/ranking-process-once.lua"));
@@ -76,6 +80,9 @@ class RedisRankingAggregationRedisIntegrationTest {
 		assertThat(firstAggregated).isTrue();
 		assertThat(duplicateAggregated).isFalse();
 		assertThat(redisTemplate.opsForZSet().score(rankingKey, "7")).isEqualTo(1.0);
+		assertThat(redisTemplate.opsForValue().get(
+			RedisRankingKey.dailyProcessedOrderCount(java.time.LocalDate.of(2026, 7, 14))
+		)).isEqualTo("1");
 		assertThat(redisTemplate.opsForZSet().score(
 			RedisRankingKey.dailyRanking(java.time.LocalDate.of(2026, 7, 15)), "7"
 		)).isNull();

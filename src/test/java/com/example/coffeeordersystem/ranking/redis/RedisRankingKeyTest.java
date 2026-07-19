@@ -15,10 +15,12 @@ class RedisRankingKeyTest {
 
 		// when
 		String dailyRankingKey = RedisRankingKey.dailyRanking(date);
+		String dailyCountKey = RedisRankingKey.dailyProcessedOrderCount(date);
 		String processedEventKey = RedisRankingKey.processedEvent(42L);
 
 		// then
 		assertThat(dailyRankingKey).isEqualTo("coffee:ranking:2026-07-15");
+		assertThat(dailyCountKey).isEqualTo("coffee:ranking:count:2026-07-15");
 		assertThat(processedEventKey).isEqualTo("coffee:ranking:processed:42");
 	}
 }

@@ -16,6 +16,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Set;
@@ -40,6 +41,8 @@ class PopularMenuRankingServiceTest {
 	@SuppressWarnings("unchecked")
 	private final ScheduledFuture<?> defaultLeaseFuture = org.mockito.Mockito.mock(ScheduledFuture.class);
 	private final Clock clock = Clock.fixed(Instant.parse("2026-07-15T01:00:00Z"), ZoneId.of("Asia/Seoul"));
+	private final org.springframework.data.redis.core.script.DefaultRedisScript<String> readSnapshotScript =
+		new org.springframework.data.redis.core.script.DefaultRedisScript<>("return ''", String.class);
 	private final PopularMenuRankingService service = new PopularMenuRankingService(
 		redisTemplate,
 		orderRepository,
@@ -52,6 +55,7 @@ class PopularMenuRankingServiceTest {
 		new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
 		new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
 		new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
+		readSnapshotScript,
 		leaseScheduler,
 		clock
 	);
@@ -61,6 +65,11 @@ class PopularMenuRankingServiceTest {
 		org.mockito.Mockito.doReturn(defaultLeaseFuture).when(leaseScheduler)
 			.scheduleAtFixedRate(org.mockito.ArgumentMatchers.any(Runnable.class), org.mockito.ArgumentMatchers.anyLong(),
 				org.mockito.ArgumentMatchers.anyLong(), any(TimeUnit.class));
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.same(readSnapshotScript),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(emptyRedisSnapshot());
 	}
 
 	@Test
@@ -80,6 +89,21 @@ class PopularMenuRankingServiceTest {
 			.thenReturn(Set.of())
 			.thenReturn(Set.of())
 			.thenReturn(Set.of());
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.same(readSnapshotScript),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(redisSnapshot(
+			"DATA|8|1|1=3,3=5",
+			"DATA|3|1|1=2,2=1",
+			"EMPTY|0|0|", "EMPTY|0|0|", "EMPTY|0|0|", "EMPTY|0|0|", "EMPTY|0|0|"
+		));
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 1L, 3L),
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 3L, 5L),
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 14), 1L, 2L),
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 14), 2L, 1L)
+		));
 
 		// when
 		List<PopularMenuRanking> rankings = service.getPopularMenuRankings();
@@ -90,13 +114,77 @@ class PopularMenuRankingServiceTest {
 			new PopularMenuRanking(3L, 5L),
 			new PopularMenuRanking(2L, 1L)
 		);
-		ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
-		verify(zSetOperations, org.mockito.Mockito.times(7)).rangeWithScores(keyCaptor.capture(), eq(0L), eq(-1L));
-		assertThat(keyCaptor.getAllValues()).containsExactly(
-			"coffee:ranking:2026-07-15", "coffee:ranking:2026-07-14", "coffee:ranking:2026-07-13",
-			"coffee:ranking:2026-07-12", "coffee:ranking:2026-07-11", "coffee:ranking:2026-07-10",
-			"coffee:ranking:2026-07-09"
+		ArgumentCaptor<List<String>> snapshotKeys = listCaptor();
+		verify(redisTemplate).execute(org.mockito.ArgumentMatchers.same(readSnapshotScript), snapshotKeys.capture(), org.mockito.ArgumentMatchers.any(Object[].class));
+		assertThat(snapshotKeys.getValue()).containsExactly(
+			"coffee:ranking:2026-07-15", "coffee:ranking:status:2026-07-15", "coffee:ranking:count:2026-07-15",
+			"coffee:ranking:2026-07-14", "coffee:ranking:status:2026-07-14", "coffee:ranking:count:2026-07-14",
+			"coffee:ranking:2026-07-13", "coffee:ranking:status:2026-07-13", "coffee:ranking:count:2026-07-13",
+			"coffee:ranking:2026-07-12", "coffee:ranking:status:2026-07-12", "coffee:ranking:count:2026-07-12",
+			"coffee:ranking:2026-07-11", "coffee:ranking:status:2026-07-11", "coffee:ranking:count:2026-07-11",
+			"coffee:ranking:2026-07-10", "coffee:ranking:status:2026-07-10", "coffee:ranking:count:2026-07-10",
+			"coffee:ranking:2026-07-09", "coffee:ranking:status:2026-07-09", "coffee:ranking:count:2026-07-09"
 		);
+		ArgumentCaptor<LocalDateTime> start = ArgumentCaptor.forClass(LocalDateTime.class);
+		ArgumentCaptor<LocalDateTime> end = ArgumentCaptor.forClass(LocalDateTime.class);
+		verify(orderRepository).findDailyPaidMenuOrderCounts(start.capture(), end.capture());
+		assertThat(start.getValue()).isEqualTo(LocalDateTime.of(2026, 7, 9, 0, 0));
+		assertThat(end.getValue()).isEqualTo(LocalDateTime.of(2026, 7, 16, 0, 0));
+	}
+
+	@Test
+	void Redis가_DATA여도_새_PAID_주문이_Consumer에_반영되지_않으면_DB_snapshot으로_응답한다() {
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.setIfAbsent(any(), any(), any(Duration.class))).thenReturn(false);
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 7L, 2L)
+		));
+		stubReadSnapshot("DATA|1|1|7=1", "|||", "|||", "|||", "|||", "|||", "|||");
+
+		assertThat(service.getPopularMenuRankings())
+			.containsExactly(new PopularMenuRanking(7L, 2L));
+		verify(valueOperations).setIfAbsent(eq("coffee:ranking:rebuilding"), any(), any(Duration.class));
+	}
+
+	@Test
+	void Redis가_EMPTY여도_새_PAID_주문이_Consumer에_반영되지_않으면_DB_snapshot으로_응답한다() {
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.setIfAbsent(any(), any(), any(Duration.class))).thenReturn(false);
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 7L, 1L)
+		));
+		stubReadSnapshot("EMPTY|0|0|", "|||", "|||", "|||", "|||", "|||", "|||");
+
+		assertThat(service.getPopularMenuRankings())
+			.containsExactly(new PopularMenuRanking(7L, 1L));
+	}
+
+	@Test
+	void Outbox_PENDING_PROCESSING_FAILED와_Kafka_DLT_지연은_PAID_원장_응답을_누락시키지_않는다() {
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.setIfAbsent(any(), any(), any(Duration.class))).thenReturn(false);
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 7L, 4L)
+		));
+		stubReadSnapshot("DATA|1|1|7=1", "|||", "|||", "|||", "|||", "|||", "|||");
+
+		assertThat(service.getPopularMenuRankings())
+			.containsExactly(new PopularMenuRanking(7L, 4L));
+	}
+
+	@Test
+	void 여러_번_재구성을_시도해도_다른_서버가_잠금을_보유하면_오래된_Redis를_반환하지_않는다() {
+		when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+		when(valueOperations.setIfAbsent(any(), any(), any(Duration.class))).thenReturn(false);
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 7L, 3L)
+		));
+		stubReadSnapshot("DATA|1|1|7=1", "|||", "|||", "|||", "|||", "|||", "|||");
+
+		assertThat(service.getPopularMenuRankings())
+			.containsExactly(new PopularMenuRanking(7L, 3L));
+		assertThat(service.getPopularMenuRankings())
+			.containsExactly(new PopularMenuRanking(7L, 3L));
 	}
 
 	@Test
@@ -186,25 +274,31 @@ class PopularMenuRankingServiceTest {
 			org.mockito.ArgumentMatchers.<String>anyList(),
 			org.mockito.ArgumentMatchers.any(Object[].class)
 		)).thenReturn(0L);
-		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenAnswer(invocation -> {
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.same(readSnapshotScript),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(emptyRedisSnapshot()).thenAnswer(invocation -> {
 			renewalCaptor.getValue().run();
-			return List.of(new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 3L, 4L));
+			return emptyRedisSnapshot();
 		});
+		when(orderRepository.findDailyPaidMenuOrderCounts(any(), any())).thenReturn(List.of(
+			new DailyMenuOrderCount(LocalDate.of(2026, 7, 15), 3L, 4L)
+		));
 		PopularMenuRankingService leaseService = new PopularMenuRankingService(
 			redisTemplate, orderRepository, orderEventRepository, Duration.ofDays(8), Duration.ofMinutes(1), Duration.ofSeconds(20),
 			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
 			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
 			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
 			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class),
-			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class), scheduler, clock
+			new org.springframework.data.redis.core.script.DefaultRedisScript<>("return 1", Long.class), readSnapshotScript, scheduler, clock
 		);
 
 		// when
 		org.assertj.core.api.ThrowableAssert.ThrowingCallable recover = leaseService::getPopularMenuRankings;
 
 		// then
-		assertThatThrownBy(recover).isInstanceOf(IllegalStateException.class)
-			.hasMessage("랭킹 Redis 재구성 잠금 소유권을 잃었습니다.");
+		assertThat(leaseService.getPopularMenuRankings()).containsExactly(new PopularMenuRanking(3L, 4L));
 		verify(zSetOperations, org.mockito.Mockito.never()).add(any(), any(), any(Double.class));
 		verify(future).cancel(false);
 	}
@@ -243,17 +337,21 @@ class PopularMenuRankingServiceTest {
 			.thenReturn(List.of(new com.example.coffeeordersystem.ranking.dto.RebuildOrderEvent(42L), new com.example.coffeeordersystem.ranking.dto.RebuildOrderEvent(43L)));
 		when(redisTemplate.execute(org.mockito.ArgumentMatchers.<org.springframework.data.redis.core.script.RedisScript<Long>>any(),
 			org.mockito.ArgumentMatchers.<String>anyList(), org.mockito.ArgumentMatchers.any(Object[].class))).thenReturn(-1L);
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.same(readSnapshotScript),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(emptyRedisSnapshot());
 		PopularMenuRankingService leaseService = new PopularMenuRankingService(
 			redisTemplate, orderRepository, orderEventRepository, Duration.ofDays(8), Duration.ofMinutes(1), Duration.ofSeconds(20),
-			releaseScript, renewScript, cleanupMarkerScript, cleanupRebuildScript, rebuildWriteScript, scheduler, clock
+			releaseScript, renewScript, cleanupMarkerScript, cleanupRebuildScript, rebuildWriteScript, readSnapshotScript, scheduler, clock
 		);
 
 		// when
 		org.assertj.core.api.ThrowableAssert.ThrowingCallable recover = leaseService::getPopularMenuRankings;
 
 		// then
-		assertThatThrownBy(recover).isInstanceOf(IllegalStateException.class)
-			.hasMessage("랭킹 Redis 재구성 잠금 소유권을 잃었습니다.");
+		assertThat(leaseService.getPopularMenuRankings()).isEmpty();
 		verify(redisTemplate).execute(org.mockito.ArgumentMatchers.same(cleanupRebuildScript),
 			org.mockito.ArgumentMatchers.<String>anyList(), org.mockito.ArgumentMatchers.any(Object[].class));
 	}
@@ -264,6 +362,27 @@ class PopularMenuRankingServiceTest {
 			tuples.add(new DefaultTypedTuple((String) membersAndScores[index], ((Number) membersAndScores[index + 1]).doubleValue()));
 		}
 		return tuples;
+	}
+
+	private String emptyRedisSnapshot() {
+		return redisSnapshot("|||", "|||", "|||", "|||", "|||", "|||", "|||");
+	}
+
+	private String redisSnapshot(String... dailySnapshots) {
+		return String.join(";", dailySnapshots);
+	}
+
+	private void stubReadSnapshot(String... dailySnapshots) {
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.same(readSnapshotScript),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(redisSnapshot(dailySnapshots));
+	}
+
+	@SuppressWarnings("unchecked")
+	private ArgumentCaptor<List<String>> listCaptor() {
+		return (ArgumentCaptor<List<String>>) (ArgumentCaptor<?>) ArgumentCaptor.forClass(List.class);
 	}
 
 	private record DefaultTypedTuple(String value, Double score) implements ZSetOperations.TypedTuple<String> {

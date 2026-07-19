@@ -90,7 +90,13 @@ class PopularMenuRankingTransactionIsolationIntegrationTest {
 		when(redisTemplate.hasKey(any())).thenReturn(false);
 		when(valueOperations.setIfAbsent(any(), any(), any(Duration.class))).thenReturn(true);
 		when(zSetOperations.rangeWithScores(any(), any(Long.class), any(Long.class))).thenReturn(java.util.Set.of());
-		when(redisTemplate.execute(any(), any(), any(Object[].class))).thenReturn(1L);
+		when(redisTemplate.execute(any(), any(), any(Object[].class))).thenAnswer(invocation -> {
+			org.springframework.data.redis.core.script.RedisScript<?> script = invocation.getArgument(0);
+			if (String.class.equals(script.getResultType())) {
+				return "|||;|||;|||;|||;|||;|||;|||";
+			}
+			return 1L;
+		});
 	}
 
 	@Test
