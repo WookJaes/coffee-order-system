@@ -31,6 +31,18 @@ public class DataPlatformKafkaConsumerConfig {
 		ConsumerFactory<String, OrderPaidEvent> consumerFactory,
 		KafkaTemplate<String, OrderPaidEvent> kafkaTemplate
 	) {
+		DefaultErrorHandler errorHandler = dataPlatformErrorHandler(kafkaTemplate);
+
+		ConcurrentKafkaListenerContainerFactory<String, OrderPaidEvent> factory =
+			new ConcurrentKafkaListenerContainerFactory<>();
+		factory.setConsumerFactory(consumerFactory);
+		factory.setConcurrency(properties.concurrency());
+		factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
+		factory.setCommonErrorHandler(errorHandler);
+		return factory;
+	}
+
+	DefaultErrorHandler dataPlatformErrorHandler(KafkaTemplate<String, OrderPaidEvent> kafkaTemplate) {
 		DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
 			kafkaTemplate,
 			(record, exception) -> new TopicPartition(properties.dltTopic(), record.partition())
@@ -43,13 +55,6 @@ public class DataPlatformKafkaConsumerConfig {
 		);
 		errorHandler.addNotRetryableExceptions(NonRetryableDataPlatformException.class);
 		errorHandler.setCommitRecovered(true);
-
-		ConcurrentKafkaListenerContainerFactory<String, OrderPaidEvent> factory =
-			new ConcurrentKafkaListenerContainerFactory<>();
-		factory.setConsumerFactory(consumerFactory);
-		factory.setConcurrency(properties.concurrency());
-		factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
-		factory.setCommonErrorHandler(errorHandler);
-		return factory;
+		return errorHandler;
 	}
 }
