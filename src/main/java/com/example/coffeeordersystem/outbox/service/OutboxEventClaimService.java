@@ -1,11 +1,10 @@
 package com.example.coffeeordersystem.outbox.service;
 
-import com.example.coffeeordersystem.order.entity.OrderEvent;
 import com.example.coffeeordersystem.order.entity.OrderEventStatus;
 import com.example.coffeeordersystem.order.repository.OrderEventRepository;
 import com.example.coffeeordersystem.outbox.config.OutboxPublisherProperties;
 import com.example.coffeeordersystem.outbox.dto.ClaimedOrderEvent;
-import com.example.coffeeordersystem.outbox.dto.OrderPaidEvent;
+import com.example.coffeeordersystem.outbox.dto.ClaimedOrderEventMessage;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -38,10 +37,15 @@ public class OutboxEventClaimService {
 			PageRequest.of(0, properties.batchSize())
 		);
 
-		candidateIds.forEach(eventId -> orderEventRepository.claimIfPending(eventId, token, now));
+		if (candidateIds.isEmpty()) {
+			return List.of();
+		}
 
-		return orderEventRepository.findByProcessingTokenOrderById(token).stream()
-			.map(event -> new ClaimedOrderEvent(token, toMessage(event)))
+		orderEventRepository.claimPendingBatch(candidateIds, token, now);
+
+		return orderEventRepository.findClaimedMessagesByProcessingToken(token).stream()
+			.map(ClaimedOrderEventMessage::toOrderPaidEvent)
+			.map(message -> new ClaimedOrderEvent(token, message))
 			.toList();
 	}
 
@@ -50,14 +54,4 @@ public class OutboxEventClaimService {
 		return orderEventRepository.renewProcessingLeases(token, LocalDateTime.now()) > 0;
 	}
 
-	private OrderPaidEvent toMessage(OrderEvent event) {
-		return new OrderPaidEvent(
-			event.getId(),
-			event.getOrder().getId(),
-			event.getUser().getId(),
-			event.getMenu().getId(),
-			event.getPaymentAmount(),
-			event.getOrder().getOrderedAt()
-		);
-	}
 }

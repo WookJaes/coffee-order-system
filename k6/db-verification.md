@@ -53,3 +53,28 @@ Load는 ID 41~42에서 최종 잔액 557,000P가 `CHARGE 800,000P - USE 243,000P
 ### MySQL 잠금·데드락 관찰
 
 실행 완료 후 `Innodb_deadlocks=0`, 현재 `data_lock_waits=0`을 확인했다. 다만 실행 중 잠금 대기와 애플리케이션 재시도 횟수는 별도로 수집하지 않아 미측정이다.
+
+## 3회차: Issue #59 Outbox 배치 선점 k6 검증
+
+**실행일:** 2026-07-20
+
+**판정:** PASS
+
+`k6/order-load.js` safe 실행에서 생성한 synthetic 사용자 54, 55만 대상으로 MySQL을 조회했다. 사용자별 집계는 `balance = CHARGE - USE`, `PAID` 주문 수 = `USE` 이력 수 = Outbox 수를 확인했고, 주문별 Outbox가 1건이 아닌 row는 조회되지 않았다.
+
+| CHARGE | USE | 최종 잔액 | PAID 주문 | USE 이력 | Outbox | 판정 |
+|-------:| ---: | ---: | ---: | ---: | ---: | --- |
+| 400,000 | 220,500 | 179,500 | 49 | 49 | 49 | PASS |
+| 400,000 | 31,500 | 368,500 | 7 | 7 | 7 | PASS |
+
+같은 실행분의 `order_events`는 `SENT 56`건이었고, 주문당 Outbox 수가 1건이 아닌 결과는 0건이었다. 이 DB 검증은 저장 정합성과 중복 Outbox row를 확인한 것이며, Kafka at-least-once 특성상 `SENT` 기록 장애 뒤의 정상 재발행은 별도 Publisher 통합 테스트로 검증한다.
+
+### 추가 safe 시나리오
+
+| 시나리오 | 사용자 수 | CHARGE 합계 | USE 합계 | 최종 잔액 합계 | PAID 주문 | USE 이력 | Outbox | 중복 Outbox 주문 | 최종 상태 | 판정 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `same-user-order.js` | 1 | 100,000 | 22,500 | 77,500 | 5 | 5 | 5 | 0 | `SENT 5` | PASS |
+| `order-stress.js` | 6 | 2,400,000 | 967,500 | 1,432,500 | 215 | 215 | 215 | 0 | `SENT 215` | PASS |
+| `order-spike.js` | 8 | 3,200,000 | 1,386,000 | 1,814,000 | 308 | 308 | 308 | 0 | `SENT 308` | PASS |
+
+각 행은 해당 시나리오에서 새로 만든 synthetic 사용자만 대상으로 집계했다. 모든 사용자에서 `balance = CHARGE - USE`, `PAID 주문 = USE 이력 = Outbox`였고 주문당 Outbox 수가 1건이 아닌 결과는 없었다.
