@@ -87,7 +87,7 @@
 Optional<Point> findByUserIdWithPessimisticLock(Long userId);
 ```
 
-### 2.5 주문 완료 이벤트 발행 전략
+### 2.5 Outbox 기반 주문 완료 이벤트 발행 전략
 
 주문 성공 후 데이터 수집 플랫폼으로 사용자 식별값, 메뉴 ID, 결제 금액을 전송해야 한다.
 
@@ -98,18 +98,12 @@ Optional<Point> findByUserIdWithPessimisticLock(Long userId);
 -> order_events에 PENDING 이벤트 저장
 -> Outbox Publisher가 Kafka topic(order-paid)에 주문 완료 이벤트 발행
 -> product-ranking-group: Redis ZSET에 메뉴별 주문 수 누적
--> data-platform-group: Mock 데이터 플랫폼 HTTP API에 주문 완료 정보 전달
+-> data-platform-group: DataPlatformClient를 통해 외부 데이터 수집 플랫폼으로 HTTP 요청 전송
 ```
 
-주문 트랜잭션 안에서 Kafka를 직접 호출하면 Kafka 장애가 주문 실패로 전파될 수 있다. 반대로 주문 저장 후 Kafka 발행만 수행하다가 실패하면 주문 데이터가 수집 플랫폼으로 전달되지 않고 유실될 수 있다.
+데이터 플랫폼 Consumer는 `data-platform-group`으로 같은 `order-paid` 토픽을 랭킹 Consumer와 독립적으로 소비한다. `DataPlatformClient`를 통해 외부 데이터 수집 플랫폼으로 HTTP 요청을 전송하도록 구현하였다. 과제에서는 Mock API 사용을 전제로 설계하였으며, 현재 프로젝트에서는 외부 시스템 연동을 `DataPlatformClient`로 추상화하였다.
 
-이를 해결하기 위해 주문 성공 시 `order_events` 테이블에 전송 대상 이벤트를 함께 저장한다. 별도 Publisher는 조건부 DB 갱신으로 `PENDING -> PROCESSING`을 선점하고 트랜잭션 밖에서 Kafka를 발행한다. 배치를 순차 발행하는 동안 현재 Kafka 전송이 지연되면, 같은 선점 토큰의 아직 전송하지 않은 대기 이벤트도 함께 lease 시각을 갱신한다. 따라서 유효한 Publisher의 배치 대기 이벤트가 처리 제한 시간만으로 다른 Publisher에 재선점되지 않는다. Kafka 발행 성공 뒤 `SENT` DB 기록이 실패하면 이를 Kafka 발행 실패로 처리하거나 실패 횟수를 증가시키지 않고 `PROCESSING` 선점 상태를 보존한다. lease 갱신이 멈춰 오래된 `PROCESSING`이 되면 다음 Publisher 실행에서 `PENDING`으로 회복해 재발행할 수 있으므로 Kafka 전달은 at-least-once다. Kafka 발행 자체가 실패하면 실패 횟수를 증가시켜 backoff 뒤 `PENDING`으로 되돌리거나 초기 발행 뒤 최대 재시도 횟수를 초과하면 `FAILED`로 상태를 관리한다.
-
-발행 메시지는 `eventId`, `orderId`, `userId`, `menuId`, `paymentAmount`, `orderedAt` JSON 필드를 가진다. `orderedAt`은 `orders.ordered_at`의 실제 주문 시각이며, Kafka 발행 지연이나 재전달에도 Consumer가 주문일 키를 선택하는 기준이다. 이전 형식 메시지처럼 이 필드가 없으면 Consumer는 `orderId`로 주문 원장을 조회해 주문 시각을 보완한다. Kafka 메시지 키는 주문 단위 순서를 위한 `orderId` 문자열이다. 기본 토픽은 `order-paid`이고 `OUTBOX_TOPIC`, `OUTBOX_PUBLISHER_FIXED_DELAY`, `OUTBOX_PUBLISHER_BATCH_SIZE`, `OUTBOX_PUBLISHER_MAX_RETRY_COUNT`, `OUTBOX_PUBLISHER_RETRY_BACKOFF`, `OUTBOX_PUBLISHER_PROCESSING_TIMEOUT`으로 운영 환경에서 조정한다.
-
-Kafka Consumer는 기본적으로 at-least-once 방식으로 동작하므로 같은 메시지가 두 번 이상 처리될 수 있다. 따라서 DB에 저장되는 중요한 데이터는 `orderId` 또는 이벤트 ID 기준으로 멱등 처리한다. 반복 재시도 후에도 처리하지 못한 메시지는 DLT(Dead Letter Topic)로 이동시켜 운영자가 원인을 확인하고 재처리할 수 있도록 한다.
-
-데이터 플랫폼 Consumer는 `data-platform-group`으로 같은 `order-paid` 토픽을 랭킹 Consumer와 독립적으로 소비한다. HTTP 요청 본문에는 `eventId`, `userId`, `menuId`, `paymentAmount`를 넣고 `Idempotency-Key: order-paid:{eventId}`를 함께 보낸다. HTTP 2xx만 성공이며, 연결 실패·timeout·5xx는 `DATA_PLATFORM_CONSUMER_MAX_RETRY_ATTEMPTS`만큼 재시도한 뒤 `DATA_PLATFORM_CONSUMER_DLT_TOPIC`으로 보낸다. 4xx는 재시도하지 않는다. HTTP 성공 뒤 offset 기록 전 중단되면 같은 요청이 다시 전송될 수 있으므로 수신 플랫폼은 이 키로 논리적 단건 수집을 보장해야 한다.
+HTTP 요청 본문에는 `eventId`, `userId`, `menuId`, `paymentAmount`를 넣고 `Idempotency-Key: order-paid:{eventId}`를 함께 보낸다. HTTP 2xx만 성공이며, 연결 실패·timeout·5xx는 `DATA_PLATFORM_CONSUMER_MAX_RETRY_ATTEMPTS`만큼 재시도한 뒤 `DATA_PLATFORM_CONSUMER_DLT_TOPIC`으로 보낸다. 4xx는 재시도하지 않는다. HTTP 성공 뒤 offset 기록 전 중단되면 같은 요청이 다시 전송될 수 있으므로 수신 플랫폼은 이 키로 논리적 단건 수집을 보장해야 한다.
 
 ### 2.6 인기 메뉴 조회 전략
 
@@ -678,6 +672,7 @@ curl http://localhost:8080/actuator/health
 MySQL, Redis, Kafka를 로컬에서 함께 실행하는 경우 다음 명령을 사용한다.
 
 로컬 환경에서는 개발 편의를 위해 단일 Kafka Broker를 사용하고, 배포 환경으로 확장할 경우 고가용성을 위해 3대 이상의 Broker 구성으로 확장한다.
+
 ```bash
 docker compose up -d
 ```
