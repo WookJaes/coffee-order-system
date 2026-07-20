@@ -2,6 +2,7 @@ package com.example.coffeeordersystem.order.repository;
 
 import com.example.coffeeordersystem.order.entity.OrderEvent;
 import com.example.coffeeordersystem.order.entity.OrderEventStatus;
+import com.example.coffeeordersystem.outbox.dto.ClaimedOrderEventMessage;
 import com.example.coffeeordersystem.ranking.dto.RebuildOrderEvent;
 
 import java.time.LocalDateTime;
@@ -43,6 +44,22 @@ public interface OrderEventRepository extends JpaRepository<OrderEvent, Long> {
 	@Modifying(clearAutomatically = true, flushAutomatically = true)
 	@Query("""
 		update OrderEvent e
+		set e.status = 'PROCESSING',
+			e.processingStartedAt = :now,
+			e.processingToken = :token
+		where e.id in :candidateIds
+		  and e.status = 'PENDING'
+		  and e.nextAttemptAt <= :now
+		""")
+	int claimPendingBatch(
+		@Param("candidateIds") List<Long> candidateIds,
+		@Param("token") String token,
+		@Param("now") LocalDateTime now
+	);
+
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query("""
+		update OrderEvent e
 		set e.status = 'PENDING',
 			e.processingStartedAt = null,
 			e.processingToken = null,
@@ -62,6 +79,23 @@ public interface OrderEventRepository extends JpaRepository<OrderEvent, Long> {
 	int renewProcessingLeases(@Param("token") String token, @Param("now") LocalDateTime now);
 
 	List<OrderEvent> findByProcessingTokenOrderById(String processingToken);
+
+	@Query("""
+		select new com.example.coffeeordersystem.outbox.dto.ClaimedOrderEventMessage(
+			e.id,
+			e.order.id,
+			e.user.id,
+			e.menu.id,
+			e.paymentAmount,
+			e.order.orderedAt
+		)
+		from OrderEvent e
+		where e.processingToken = :processingToken
+		order by e.id
+		""")
+	List<ClaimedOrderEventMessage> findClaimedMessagesByProcessingToken(
+		@Param("processingToken") String processingToken
+	);
 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("select e from OrderEvent e where e.id = :eventId")
