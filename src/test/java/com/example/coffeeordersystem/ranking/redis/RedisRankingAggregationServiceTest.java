@@ -1,0 +1,137 @@
+package com.example.coffeeordersystem.ranking.redis;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.example.coffeeordersystem.outbox.dto.OrderPaidEvent;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
+
+class RedisRankingAggregationServiceTest {
+
+	private final StringRedisTemplate redisTemplate = org.mockito.Mockito.mock(StringRedisTemplate.class);
+	private final DefaultRedisScript<Long> processOnceScript = new DefaultRedisScript<>("return 1", Long.class);
+	private final RedisRankingAggregationService service = new RedisRankingAggregationService(
+		redisTemplate,
+		Duration.ofDays(8),
+		Clock.fixed(Instant.parse("2026-07-15T01:00:00Z"), ZoneId.of("Asia/Seoul")),
+		processOnceScript
+	);
+
+	@Test
+	void 자정_이후_소비해도_주문_시각의_Asia_Seoul_날짜_ZSET에_메뉴_주문수를_한번_증가시킨다() {
+		// given
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.<RedisScript<Long>>any(),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(1L);
+
+
+		// when
+		boolean aggregated = service.aggregate(new OrderPaidEvent(
+			42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 14, 23, 59, 59)
+		));
+
+		// then
+		assertThat(aggregated).isTrue();
+		ArgumentCaptor<List<String>> keyCaptor = listCaptor();
+		ArgumentCaptor<Object[]> argumentCaptor = ArgumentCaptor.forClass(Object[].class);
+		verify(redisTemplate).execute(org.mockito.ArgumentMatchers.same(processOnceScript), keyCaptor.capture(), argumentCaptor.capture());
+		assertThat(keyCaptor.getValue()).containsExactly(
+			"coffee:ranking:processed:42",
+			"coffee:ranking:2026-07-14",
+			"coffee:ranking:count:2026-07-14",
+			"coffee:ranking:rebuilding",
+			"coffee:ranking:status:2026-07-14"
+		);
+		assertThat(argumentCaptor.getValue()).containsExactly("691200", "1", "7");
+	}
+
+	@Test
+	void 이미_처리한_이벤트는_ZSET_점수를_다시_증가시키지_않는다() {
+		// given
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.<RedisScript<Long>>any(),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(0L);
+
+
+		// when
+		boolean aggregated = service.aggregate(new OrderPaidEvent(
+			42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0)
+		));
+
+		// then
+		assertThat(aggregated).isFalse();
+	}
+
+	@Test
+	void Redis_재구성_잠금_중에는_이벤트_집계를_재시도하도록_예외를_발생시킨다() {
+		// given
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.<RedisScript<Long>>any(),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(-1L);
+
+		// when
+		org.assertj.core.api.ThrowableAssert.ThrowingCallable aggregate = () ->
+			service.aggregate(new OrderPaidEvent(
+				42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0)
+			));
+
+		// then
+		assertThatThrownBy(aggregate).isInstanceOf(IllegalStateException.class)
+			.hasMessage("랭킹 Redis 재구성 중입니다.");
+	}
+
+	@Test
+	void Redis_집계_키_사전검증_실패는_부분_반영없이_형식_오류를_전파한다() {
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.<RedisScript<Long>>any(),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenReturn(-2L);
+
+		assertThatThrownBy(() -> service.aggregate(new OrderPaidEvent(
+			42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0)
+		)))
+			.isInstanceOf(IllegalStateException.class)
+			.hasMessage("랭킹 Redis 집계 키 형식이 올바르지 않습니다.");
+	}
+
+	@Test
+	void Redis_연결_예외는_재구성_불일치로_바꾸지_않고_그대로_전파한다() {
+		when(redisTemplate.execute(
+			org.mockito.ArgumentMatchers.<RedisScript<Long>>any(),
+			org.mockito.ArgumentMatchers.<String>anyList(),
+			org.mockito.ArgumentMatchers.any(Object[].class)
+		)).thenThrow(new RuntimeException("redis unavailable"));
+
+		assertThatThrownBy(() -> service.aggregate(new OrderPaidEvent(
+			42L, 10L, 3L, 7L, 4_500, LocalDateTime.of(2026, 7, 15, 10, 0)
+		)))
+			.isInstanceOf(RuntimeException.class)
+			.hasMessage("redis unavailable");
+	}
+
+	@SuppressWarnings("unchecked")
+	private ArgumentCaptor<List<String>> listCaptor() {
+		return (ArgumentCaptor<List<String>>) (ArgumentCaptor<?>) ArgumentCaptor.forClass(List.class);
+	}
+}

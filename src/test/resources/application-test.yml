@@ -1,0 +1,41 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:coffee-order;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+  flyway:
+    enabled: false
+  kafka:
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.example.coffeeordersystem.outbox.dto
+        spring.json.value.default.type: com.example.coffeeordersystem.outbox.dto.OrderPaidEvent
+
+outbox:
+  publisher:
+    topic: order-paid
+    fixed-delay: PT1H
+    batch-size: 100
+    max-retry-count: 3
+    retry-backoff: PT0S
+    processing-timeout: PT1M
+
+ranking:
+  redis:
+    key-ttl: PT192H
+    rebuild-lock-ttl: PT1M
+    rebuild-lock-renew-interval: PT20S
+
+data-platform:
+  consumer:
+    enabled: false

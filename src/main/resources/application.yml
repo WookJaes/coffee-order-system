@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: coffeeordersystem
+  config:
+    import: optional:file:.env[.properties]
+  profiles:
+    default: local
